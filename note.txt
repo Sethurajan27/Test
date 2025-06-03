@@ -1,110 +1,70 @@
-let monitorInterval = null;
-let tempEmailData = {
-  email: "",
-  token: "",
-  seenIds: [],
-  log: ""
-};
-
-// Start monitoring
-function startMonitoring() {
-  if (monitorInterval) {
-    return { email: tempEmailData.email, status: "Already monitoring" };
-  }
-
-  // Get domain
-  const domainData = JSON.parse(UrlFetchApp.fetch("https://api.mail.tm/domains").getContentText());
-  const domain = domainData["hydra:member"][0].domain;
-  const username = "user" + Math.floor(Math.random() * 100000);
-  const email = `${username}@${domain}`;
-  const password = "password123";
-
-  // Register
-  UrlFetchApp.fetch("https://api.mail.tm/accounts", {
-    method: "post",
-    contentType: "application/json",
-    payload: JSON.stringify({ address: email, password: password })
-  });
-
-  // Authenticate
-  const tokenResp = UrlFetchApp.fetch("https://api.mail.tm/token", {
-    method: "post",
-    contentType: "application/json",
-    payload: JSON.stringify({ address: email, password: password })
-  });
-  const token = JSON.parse(tokenResp.getContentText()).token;
-
-  tempEmailData.email = email;
-  tempEmailData.token = token;
-  tempEmailData.seenIds = [];
-  tempEmailData.log = `Monitoring started at ${new Date().toLocaleString()}\nEmail: ${email}\n`;
-
-  // Create time-based trigger every minute
-  monitorInterval = ScriptApp.newTrigger("checkInbox")
-    .timeBased()
-    .everyMinutes(1)
-    .create();
-
-  return { email, status: "Monitoring started" };
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile("Page")
+    .setTitle("Temp Mail Monitor")
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-// Stop monitoring
-function stopMonitoring() {
-  const triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(trigger => {
-    if (trigger.getHandlerFunction() === "checkInbox") {
-      ScriptApp.deleteTrigger(trigger);
-    }
-  });
 
-  monitorInterval = null;
-  tempEmailData.log += `Monitoring stopped at ${new Date().toLocaleString()}\n`;
-  return { status: "Stopped" };
-}
 
-// Live log for HTML frontend
-function getLiveLog() {
-  return tempEmailData.log || "No logs yet.";
-}
 
-// Check inbox
-function checkInbox() {
-  const token = tempEmailData.token;
-  if (!token) return;
 
-  const headers = { Authorization: `Bearer ${token}` };
-  const inboxResp = UrlFetchApp.fetch("https://api.mail.tm/messages", { headers });
-  const messages = JSON.parse(inboxResp.getContentText())["hydra:member"];
 
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["Timestamp", "Subject", "OTP", "Verification Link"]);
-  }
 
-  messages.forEach(msg => {
-    if (!tempEmailData.seenIds.includes(msg.id)) {
-      tempEmailData.seenIds.push(msg.id);
 
-      const msgResp = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, { headers });
-      const msgData = JSON.parse(msgResp.getContentText());
-      const body = msgData.text;
-      const subject = msgData.subject || "No Subject";
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+        background-color: #f9f9f9;
+      }
+      button {
+        margin: 5px;
+        padding: 10px 15px;
+        font-size: 14px;
+      }
+      pre {
+        background-color: #fff;
+        padding: 10px;
+        border: 1px solid #ccc;
+        max-height: 400px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>📬 Temp Mail Monitor</h2>
+    <button onclick="start()">Start Monitoring</button>
+    <button onclick="stop()">Stop Monitoring</button>
+    <p><strong>Status:</strong> <span id="status">Idle</span></p>
+    <pre id="log">Waiting for logs...</pre>
 
-      // Extract OTP (6-digit number)
-      const otpMatch = body.match(/\b\d{6}\b/);
-      const otp = otpMatch ? otpMatch[0] : "NULL";
+    <script>
+      function updateLog() {
+        google.script.run.withSuccessHandler(function(log) {
+          document.getElementById("log").textContent = log;
+        }).getLiveLog();
+      }
 
-      // Extract verification link (ElevenLabs example)
-      const linkMatch = body.match(/https:\/\/elevenlabs\.io\/[^\s)]+/);
-      const link = linkMatch ? linkMatch[0] : "NULL";
+      function start() {
+        google.script.run.withSuccessHandler(function(result) {
+          document.getElementById("status").textContent = `Started: ${result.email}`;
+        }).startMonitoring();
+      }
 
-      const timestamp = new Date();
+      function stop() {
+        google.script.run.withSuccessHandler(function(result) {
+          document.getElementById("status").textContent = result.status;
+        }).stopMonitoring();
+      }
 
-      // Append to spreadsheet
-      sheet.appendRow([timestamp, subject, otp, link]);
-
-      // Append to HTML log
-      tempEmailData.log += `[${timestamp.toLocaleTimeString()}]\nSubject: ${subject}\nOTP: ${otp}\nVerification Link: ${link}\n---\n`;
-    }
-  });
-}
+      // Poll log every 3 seconds
+      setInterval(updateLog, 3000);
+      updateLog(); // Initial call
+    </script>
+  </body>
+</html>
