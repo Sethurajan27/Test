@@ -65,6 +65,12 @@ function getEmailAddress() {
   return PropertiesService.getScriptProperties().getProperty('email');
 }
 
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Page')
+    .setTitle('1SecMail Monitor')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
 
 
 
