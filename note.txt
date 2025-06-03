@@ -1,6 +1,8 @@
 let token = '';
 let account = {};
 let lastMessageId = '';
+let triggerId = '';
+let logHistory = [];
 
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Page')
@@ -12,18 +14,21 @@ function startMonitoring() {
   token = '';
   account = {};
   lastMessageId = '';
+  logHistory = [];
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   sheet.clear();
-  sheet.appendRow(['Mail Address', 'Timestamp', 'Sender', 'Subject', 'OTP', 'Body']);
+  sheet.appendRow(['Type', 'Timestamp', 'Email Address', 'Sender', 'Subject', 'OTP', 'Body']);
 
-  // Generate email & get token
-  const domain = UrlFetchApp.fetch('https://api.mail.tm/domains').getContentText();
-  const domainName = JSON.parse(domain)['hydra:member'][0].domain;
+  // Get a mail domain
+  const domains = JSON.parse(UrlFetchApp.fetch('https://api.mail.tm/domains').getContentText());
+  const domain = domains['hydra:member'][0].domain;
 
-  const email = 'temp' + Math.floor(Math.random() * 100000) + '@' + domainName;
+  // Generate email
+  const email = 'temp' + Math.floor(Math.random() * 100000) + '@' + domain;
   const password = 'Test1234!';
 
+  // Register account
   UrlFetchApp.fetch('https://api.mail.tm/accounts', {
     method: 'post',
     contentType: 'application/json',
@@ -31,62 +36,63 @@ function startMonitoring() {
     muteHttpExceptions: true
   });
 
-  const login = UrlFetchApp.fetch('https://api.mail.tm/token', {
+  // Login to get token
+  const loginResponse = UrlFetchApp.fetch('https://api.mail.tm/token', {
     method: 'post',
     contentType: 'application/json',
     payload: JSON.stringify({ address: email, password: password })
   });
-
-  const loginData = JSON.parse(login.getContentText());
+  const loginData = JSON.parse(loginResponse.getContentText());
   token = loginData.token;
   account.email = email;
   account.password = password;
 
-  // Log the mail ID once
-  sheet.appendRow([email, new Date(), '', '', '', '']);
+  // Log initial info
+  const now = new Date();
+  sheet.appendRow(['INIT', now, email, '', '', '', '']);
+  logHistory.push(`[${now.toLocaleString()}] Monitoring started. Email: ${email}`);
 
-  ScriptApp.newTrigger('pollInbox')
+  // Start trigger
+  const trigger = ScriptApp.newTrigger('pollInbox')
     .timeBased()
     .everyMinutes(1)
     .create();
+  triggerId = trigger.getUniqueId();
 
-  return { email };
+  return { email, log: logHistory.join('\n') };
 }
 
 function pollInbox() {
   if (!token) return;
 
-  const response = UrlFetchApp.fetch('https://api.mail.tm/messages', {
+  const inbox = UrlFetchApp.fetch('https://api.mail.tm/messages', {
     method: 'get',
-    headers: {
-      Authorization: 'Bearer ' + token
-    }
+    headers: { Authorization: 'Bearer ' + token }
   });
-
-  const messages = JSON.parse(response.getContentText())['hydra:member'];
+  const messages = JSON.parse(inbox.getContentText())['hydra:member'];
 
   if (messages.length === 0 || messages[0].id === lastMessageId) return;
 
-  const messageId = messages[0].id;
-  lastMessageId = messageId;
+  const msg = messages[0];
+  lastMessageId = msg.id;
 
-  const messageDetails = UrlFetchApp.fetch(`https://api.mail.tm/messages/${messageId}`, {
+  const details = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
     method: 'get',
-    headers: {
-      Authorization: 'Bearer ' + token
-    }
+    headers: { Authorization: 'Bearer ' + token }
   });
+  const content = JSON.parse(details.getContentText());
 
-  const msg = JSON.parse(messageDetails.getContentText());
-  const sender = msg.from.address;
-  const subject = msg.subject;
-  const body = msg.text;
-  const timestamp = msg.createdAt;
-
+  const timestamp = content.createdAt;
+  const sender = content.from.address;
+  const subject = content.subject;
+  const body = content.text;
   const otp = extractOTP(body);
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  sheet.appendRow(['', timestamp, sender, subject, otp, body]);
+  sheet.appendRow(['EMAIL', timestamp, account.email, sender, subject, otp, body]);
+
+  const logLine = `[${new Date().toLocaleTimeString()}] New email from ${sender} with OTP: ${otp}`;
+  logHistory.push(logLine);
 }
 
 function extractOTP(text) {
@@ -94,12 +100,20 @@ function extractOTP(text) {
   return match ? match[0] : '';
 }
 
-function getEmailAddress() {
-  return account.email || '';
+function getLiveLog() {
+  return logHistory.join('\n');
 }
 
-
-
+function stopMonitoring() {
+  const allTriggers = ScriptApp.getProjectTriggers();
+  for (let t of allTriggers) {
+    if (t.getHandlerFunction() === 'pollInbox') {
+      ScriptApp.deleteTrigger(t);
+    }
+  }
+  logHistory.push(`[${new Date().toLocaleString()}] Monitoring stopped.`);
+  return { stopped: true, log: logHistory.join('\n') };
+}
 
 
 
@@ -115,22 +129,37 @@ function getEmailAddress() {
     <base target="_top">
     <style>
       body { font-family: Arial; padding: 20px; }
-      .log { margin-top: 20px; white-space: pre-wrap; background: #f5f5f5; padding: 10px; border-radius: 5px; }
+      button { margin-right: 10px; }
+      #log { white-space: pre-wrap; background: #f0f0f0; padding: 10px; margin-top: 20px; border-radius: 6px; }
     </style>
   </head>
   <body>
     <h2>Mail.tm Inbox Monitor</h2>
     <button onclick="start()">Start Monitoring</button>
-    <div class="log" id="log"></div>
+    <button onclick="stop()">Stop Monitoring</button>
+    <div id="log">Press "Start Monitoring" to begin...</div>
 
     <script>
       function start() {
-        document.getElementById("log").innerText = "Starting...";
-        google.script.run.withSuccessHandler(updateUI).startMonitoring();
+        document.getElementById('log').innerText = 'Starting monitor...';
+        google.script.run.withSuccessHandler(updateLog).startMonitoring();
+        pollUpdates();
       }
 
-      function updateUI(data) {
-        document.getElementById("log").innerText = `Monitoring started.\nMail ID: ${data.email}\n\nCheck your inbox by sending test emails to this address. Logs will appear in your Google Sheet.`;
+      function stop() {
+        google.script.run.withSuccessHandler(updateLog).stopMonitoring();
+      }
+
+      function updateLog(data) {
+        document.getElementById('log').innerText = data.log || 'Done.';
+      }
+
+      function pollUpdates() {
+        setInterval(() => {
+          google.script.run.withSuccessHandler(log => {
+            document.getElementById('log').innerText = log;
+          }).getLiveLog();
+        }, 10000); // every 10 seconds
       }
     </script>
   </body>
