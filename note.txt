@@ -4,109 +4,94 @@ https://script.google.com/u/0/home/projects/create?parent=1UFb8AUUZyp5KYaFIxANlq
 
 
 
-// --- GLOBAL VARS ---
-let running = true;
-const emailDomain = '1secmail.com';
-let generatedLogin = '';
 
-function startMonitoring() {
-  generatedLogin = Utilities.getUuid().split('-')[0]; // generate random email
-  const email = `${generatedLogin}@${emailDomain}`;
-  PropertiesService.getScriptProperties().setProperty('email', email);
-  running = true;
-  monitorInbox();
-}
 
-function stopMonitoring() {
-  running = false;
-}
+// Called by frontend every 10 seconds
+function pollInboxFast() {
+  const isRunning = PropertiesService.getScriptProperties().getProperty('running');
+  if (isRunning !== 'true') return { status: 'Stopped' };
 
-function monitorInbox() {
   const email = PropertiesService.getScriptProperties().getProperty('email');
-  if (!email || !running) return;
+  if (!email) return { status: 'No email' };
 
   const [login, domain] = email.split('@');
-  const url = `https://www.1secmail.com/api/v1/?action=getMessages&login=${login}&domain=${domain}`;
-  const response = UrlFetchApp.fetch(url);
-  const messages = JSON.parse(response.getContentText());
+  const listUrl = `https://www.1secmail.com/api/v1/?action=getMessages&login=${login}&domain=${domain}`;
+  const messages = JSON.parse(UrlFetchApp.fetch(listUrl).getContentText());
+
+  const sheet = getInboxSheet();
+  const existingIDs = sheet.getRange(2, 1, sheet.getLastRow(), 1).getValues().flat();
+  let newCount = 0;
 
   messages.forEach(msg => {
-    const messageId = msg.id;
-    const detailUrl = `https://www.1secmail.com/api/v1/?action=readMessage&login=${login}&domain=${domain}&id=${messageId}`;
-    const detailRes = UrlFetchApp.fetch(detailUrl);
-    const detail = JSON.parse(detailRes.getContentText());
+    if (!existingIDs.includes(String(msg.id))) {
+      const detailUrl = `https://www.1secmail.com/api/v1/?action=readMessage&login=${login}&domain=${domain}&id=${msg.id}`;
+      const detail = JSON.parse(UrlFetchApp.fetch(detailUrl).getContentText());
 
-    const content = detail.body || detail.textBody || '';
-    const otpMatch = content.match(/\b\d{4,8}\b/); // find 4-8 digit OTP
-    const otp = otpMatch ? otpMatch[0] : '';
+      const content = detail.body || detail.textBody || '';
+      const otpMatch = content.match(/\b\d{4,8}\b/);
+      const otp = otpMatch ? otpMatch[0] : '';
 
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Inbox');
-    const existingIds = sheet.getRange(2, 1, sheet.getLastRow(), 1).getValues().flat();
-    if (!existingIds.includes(String(messageId))) {
       sheet.appendRow([
-        messageId,
-        new Date(detail.date),
+        msg.id,
+        detail.date,
         detail.from,
         otp,
         content
       ]);
+
+      newCount++;
     }
   });
 
-  if (running) {
-    ScriptApp.newTrigger('monitorInbox')
-      .timeBased()
-      .after(30000) // every 30 seconds
-      .create();
+  return {
+    status: `Checked at ${new Date().toLocaleTimeString()}, ${newCount} new message(s)`,
+    email: email
+  };
+}
+
+
+
+
+
+
+
+
+
+
+<script>
+  let intervalID = null;
+
+  function log(msg) {
+    const logDiv = document.getElementById('log');
+    logDiv.textContent += '\n' + msg;
+    logDiv.scrollTop = logDiv.scrollHeight;
   }
-}
 
-function getEmailAddress() {
-  return PropertiesService.getScriptProperties().getProperty('email');
-}
+  function start() {
+    log("Starting monitor...");
+    google.script.run.withSuccessHandler(function(email) {
+      document.getElementById('email').textContent = "Email: " + email;
+      log("Monitoring started for: " + email);
+      // Start polling every 10 seconds
+      intervalID = setInterval(checkInbox, 10000); // 10,000 ms = 10 sec
+    }).startMonitoring();
+  }
 
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Page')
-    .setTitle('1SecMail Monitor')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
+  function stop() {
+    google.script.run.stopMonitoring();
+    document.getElementById('email').textContent = "Monitoring stopped.";
+    log("Monitoring stopped by user.");
+    clearInterval(intervalID);
+  }
 
-
-
-
-
-
-<!DOCTYPE html>
-<html>
-  <head>
-    <base target="_top">
-    <style>
-      body { font-family: sans-serif; padding: 20px; }
-      button { padding: 10px 20px; margin-right: 10px; }
-      #email { font-weight: bold; margin-top: 10px; }
-    </style>
-  </head>
-  <body>
-    <h2>📨 1SecMail Monitor</h2>
-    <button onclick="start()">Start</button>
-    <button onclick="stop()">Stop</button>
-    <div id="email"></div>
-
-    <script>
-      function start() {
-        google.script.run
-          .withSuccessHandler(() => {
-            google.script.run.withSuccessHandler(email => {
-              document.getElementById("email").innerHTML = `Monitoring email: <br><code>${email}</code>`;
-            }).getEmailAddress();
-          })
-          .startMonitoring();
+  function checkInbox() {
+    google.script.run.withSuccessHandler(function(result) {
+      if (result && result.status) {
+        log(result.status);
+        if (result.email) {
+          document.getElementById('email').textContent = "Email: " + result.email;
+        }
       }
-
-      function stop() {
-        google.script.run.stopMonitoring();
-        document.getElementById("email").innerHTML = "Monitoring stopped.";
-      }
-    </script>
-  </body>
-</html>
+    }).pollInboxFast();
+  }
+</script>
