@@ -1,3 +1,8 @@
+let token = '';
+let account = {};
+let lastMessageId = '';
+let logHistory = [];
+
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Page')
     .setTitle('Mail.tm Inbox Monitor')
@@ -5,8 +10,10 @@ function doGet() {
 }
 
 function startMonitoring() {
-  const props = PropertiesService.getScriptProperties();
-  props.deleteAllProperties();
+  token = '';
+  account = {};
+  lastMessageId = '';
+  logHistory = [];
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   sheet.clear();
@@ -21,41 +28,33 @@ function startMonitoring() {
   UrlFetchApp.fetch('https://api.mail.tm/accounts', {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({ address: email, password: password }),
+    payload: JSON.stringify({ address: email, password }),
     muteHttpExceptions: true
   });
 
   const loginResponse = UrlFetchApp.fetch('https://api.mail.tm/token', {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({ address: email, password: password })
+    payload: JSON.stringify({ address: email, password })
   });
-
   const loginData = JSON.parse(loginResponse.getContentText());
-  props.setProperty('TOKEN', loginData.token);
-  props.setProperty('EMAIL', email);
-  props.setProperty('PASSWORD', password);
-  props.setProperty('LAST_ID', '');
+  token = loginData.token;
+  account.email = email;
+  account.password = password;
 
-  const log = [`[${new Date().toLocaleString()}] Monitoring started. Email: ${email}`];
-  props.setProperty('LOG', JSON.stringify(log));
+  const now = new Date();
+  sheet.appendRow(['INIT', now, email, '', '', '', '', '']);
+  logHistory.push(`[${now.toLocaleString()}] Monitoring started. Email: ${email}`);
 
-  const trigger = ScriptApp.newTrigger('pollInbox')
+  ScriptApp.newTrigger('pollInbox')
     .timeBased()
     .everyMinutes(1)
     .create();
-  props.setProperty('TRIGGER_ID', trigger.getUniqueId());
 
-  return { email, log: log.join('\n') };
+  return { email, log: logHistory.join('\n') };
 }
 
 function pollInbox() {
-  const props = PropertiesService.getScriptProperties();
-  const token = props.getProperty('TOKEN');
-  const email = props.getProperty('EMAIL');
-  const lastId = props.getProperty('LAST_ID');
-  const logs = JSON.parse(props.getProperty('LOG') || '[]');
-
   if (!token) return;
 
   const inbox = UrlFetchApp.fetch('https://api.mail.tm/messages', {
@@ -63,10 +62,11 @@ function pollInbox() {
     headers: { Authorization: 'Bearer ' + token }
   });
   const messages = JSON.parse(inbox.getContentText())['hydra:member'];
-  if (messages.length === 0 || messages[0].id === lastId) return;
+
+  if (messages.length === 0 || messages[0].id === lastMessageId) return;
 
   const msg = messages[0];
-  props.setProperty('LAST_ID', msg.id);
+  lastMessageId = msg.id;
 
   const details = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
     method: 'get',
@@ -83,91 +83,36 @@ function pollInbox() {
   const link = extractVerificationLink(body);
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  sheet.appendRow(['EMAIL', timestamp, email, sender, subject, otp, link, body]);
+  sheet.appendRow([
+    'EMAIL', timestamp, account.email, sender, subject,
+    otp || 'NULL', link || 'NULL', body
+  ]);
 
-  const logLine = `[${new Date().toLocaleTimeString()}] New email from ${sender}\n- OTP: ${otp}\n- Link: ${link}`;
-  logs.push(logLine);
-  props.setProperty('LOG', JSON.stringify(logs));
+  const logLine = `[${new Date().toLocaleTimeString()}] Email from ${sender} | OTP: ${otp || 'NULL'} | Link: ${link || 'NULL'}`;
+  logHistory.push(logLine);
 }
 
 function extractOTP(text) {
   const match = text.match(/\b\d{4,8}\b/);
-  return match ? match[0] : 'NULL';
+  return match ? match[0] : '';
 }
 
 function extractVerificationLink(text) {
-  const match = text.match(/https:\/\/[^\s]+/);
-  return match ? match[0] : 'NULL';
+  const match = text.match(/https?:\/\/[^\s]*(verify|action)[^\s]*/i);
+  return match ? match[0] : '';
 }
 
 function getLiveLog() {
-  const props = PropertiesService.getScriptProperties();
-  const logs = JSON.parse(props.getProperty('LOG') || '[]');
-  return logs.join('\n');
+  return logHistory.join('\n');
 }
 
 function stopMonitoring() {
-  const props = PropertiesService.getScriptProperties();
-  const logs = JSON.parse(props.getProperty('LOG') || '[]');
-
-  const triggers = ScriptApp.getProjectTriggers();
-  for (let t of triggers) {
+  const allTriggers = ScriptApp.getProjectTriggers();
+  for (let t of allTriggers) {
     if (t.getHandlerFunction() === 'pollInbox') {
       ScriptApp.deleteTrigger(t);
     }
   }
-
-  logs.push(`[${new Date().toLocaleString()}] Monitoring stopped.`);
-  props.setProperty('LOG', JSON.stringify(logs));
-  return { stopped: true, log: logs.join('\n') };
+  logHistory.push(`[${new Date().toLocaleString()}] Monitoring stopped.`);
+  return { stopped: true, log: logHistory.join('\n') };
 }
-
-
-
-
-
-
-
-
-
-<!DOCTYPE html>
-<html>
-  <head>
-    <base target="_top">
-    <style>
-      body { font-family: Arial; padding: 20px; }
-      button { margin-right: 10px; }
-      #log { white-space: pre-wrap; background: #f0f0f0; padding: 10px; margin-top: 20px; border-radius: 6px; }
-    </style>
-  </head>
-  <body>
-    <h2>Mail.tm Inbox Monitor</h2>
-    <button onclick="start()">Start Monitoring</button>
-    <button onclick="stop()">Stop Monitoring</button>
-    <div id="log">Press "Start Monitoring" to begin...</div>
-
-    <script>
-      let polling = null;
-
-      function start() {
-        document.getElementById('log').innerText = 'Starting monitor...';
-        google.script.run.withSuccessHandler(data => {
-          document.getElementById('log').innerText = data.log;
-          if (polling) clearInterval(polling);
-          polling = setInterval(() => {
-            google.script.run.withSuccessHandler(log => {
-              document.getElementById('log').innerText = log;
-            }).getLiveLog();
-          }, 10000);
-        }).startMonitoring();
-      }
-
-      function stop() {
-        if (polling) clearInterval(polling);
-        google.script.run.withSuccessHandler(data => {
-          document.getElementById('log').innerText = data.log;
-        }).stopMonitoring();
-      }
-    </script>
-  </body>
-</html>
