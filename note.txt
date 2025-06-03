@@ -1,17 +1,20 @@
 let monitorInterval = null;
 let tempEmailData = {
   email: "",
+  token: "",
   seenIds: [],
   log: ""
 };
 
+// Start monitoring
 function startMonitoring() {
   if (monitorInterval) {
     return { email: tempEmailData.email, status: "Already monitoring" };
   }
 
-  // Generate new temp email
-  const domain = JSON.parse(UrlFetchApp.fetch("https://api.mail.tm/domains").getContentText()).hydra:member[0].domain;
+  // Get domain
+  const domainData = JSON.parse(UrlFetchApp.fetch("https://api.mail.tm/domains").getContentText());
+  const domain = domainData["hydra:member"][0].domain;
   const username = "user" + Math.floor(Math.random() * 100000);
   const email = `${username}@${domain}`;
   const password = "password123";
@@ -36,14 +39,16 @@ function startMonitoring() {
   tempEmailData.seenIds = [];
   tempEmailData.log = `Monitoring started at ${new Date().toLocaleString()}\nEmail: ${email}\n`;
 
+  // Create time-based trigger every minute
   monitorInterval = ScriptApp.newTrigger("checkInbox")
     .timeBased()
-    .everyMinutes(1) // Google doesn't allow sub-minute triggers
+    .everyMinutes(1)
     .create();
 
   return { email, status: "Monitoring started" };
 }
 
+// Stop monitoring
 function stopMonitoring() {
   const triggers = ScriptApp.getProjectTriggers();
   triggers.forEach(trigger => {
@@ -57,19 +62,24 @@ function stopMonitoring() {
   return { status: "Stopped" };
 }
 
+// Live log for HTML frontend
 function getLiveLog() {
   return tempEmailData.log || "No logs yet.";
 }
 
+// Check inbox
 function checkInbox() {
   const token = tempEmailData.token;
   if (!token) return;
 
   const headers = { Authorization: `Bearer ${token}` };
   const inboxResp = UrlFetchApp.fetch("https://api.mail.tm/messages", { headers });
-  const messages = JSON.parse(inboxResp.getContentText()).hydra:member;
+  const messages = JSON.parse(inboxResp.getContentText())["hydra:member"];
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["Timestamp", "Subject", "OTP", "Verification Link"]);
+  }
 
   messages.forEach(msg => {
     if (!tempEmailData.seenIds.includes(msg.id)) {
@@ -78,86 +88,23 @@ function checkInbox() {
       const msgResp = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, { headers });
       const msgData = JSON.parse(msgResp.getContentText());
       const body = msgData.text;
+      const subject = msgData.subject || "No Subject";
 
+      // Extract OTP (6-digit number)
       const otpMatch = body.match(/\b\d{6}\b/);
-      const linkMatch = body.match(/https:\/\/elevenlabs\.io\/[^\s)]+/);
-
       const otp = otpMatch ? otpMatch[0] : "NULL";
+
+      // Extract verification link (ElevenLabs example)
+      const linkMatch = body.match(/https:\/\/elevenlabs\.io\/[^\s)]+/);
       const link = linkMatch ? linkMatch[0] : "NULL";
 
-      // Log in spreadsheet
-      sheet.appendRow([new Date(), msg.subject, otp, link]);
+      const timestamp = new Date();
 
-      // Log in HTML
-      tempEmailData.log += `\n[${new Date().toLocaleTimeString()}]\nSubject: ${msg.subject}\nOTP: ${otp}\nVerification Link: ${link}\n---\n`;
+      // Append to spreadsheet
+      sheet.appendRow([timestamp, subject, otp, link]);
+
+      // Append to HTML log
+      tempEmailData.log += `[${timestamp.toLocaleTimeString()}]\nSubject: ${subject}\nOTP: ${otp}\nVerification Link: ${link}\n---\n`;
     }
   });
 }
-
-
-
-
-
-
-
-
-
-
-
-<!DOCTYPE html>
-<html>
-  <head>
-    <base target="_top">
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        margin: 20px;
-      }
-      #log {
-        white-space: pre-wrap;
-        background: #f4f4f4;
-        border: 1px solid #ccc;
-        padding: 10px;
-        max-height: 400px;
-        overflow-y: auto;
-        font-size: 14px;
-      }
-      button {
-        margin-top: 10px;
-        margin-right: 10px;
-      }
-    </style>
-    <script>
-      function updateLog() {
-        google.script.run.withSuccessHandler(function(logText) {
-          document.getElementById("log").textContent = logText;
-        }).getLiveLog();
-      }
-
-      function startMonitoring() {
-        google.script.run.withSuccessHandler(function(data) {
-          document.getElementById("email").textContent = "Temp Email: " + data.email;
-          updateLog();
-        }).startMonitoring();
-      }
-
-      function stopMonitoring() {
-        google.script.run.withSuccessHandler(function(data) {
-          updateLog();
-          alert("Monitoring stopped.");
-        }).stopMonitoring();
-      }
-
-      setInterval(updateLog, 3000);
-      window.onload = updateLog;
-    </script>
-  </head>
-  <body>
-    <h2>Temp Mail Monitor</h2>
-    <div id="email"></div>
-    <button onclick="startMonitoring()">Start Monitoring</button>
-    <button onclick="stopMonitoring()">Stop Monitoring</button>
-    <h3>Live Log:</h3>
-    <div id="log">(Log will appear here...)</div>
-  </body>
-</html>
