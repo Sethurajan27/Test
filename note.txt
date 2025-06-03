@@ -1,118 +1,163 @@
-let token = '';
-let account = {};
-let lastMessageId = '';
-let logHistory = [];
-
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Page')
-    .setTitle('Mail.tm Inbox Monitor')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
+let monitorInterval = null;
+let tempEmailData = {
+  email: "",
+  seenIds: [],
+  log: ""
+};
 
 function startMonitoring() {
-  token = '';
-  account = {};
-  lastMessageId = '';
-  logHistory = [];
+  if (monitorInterval) {
+    return { email: tempEmailData.email, status: "Already monitoring" };
+  }
 
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  sheet.clear();
-  sheet.appendRow(['Type', 'Timestamp', 'Email Address', 'Sender', 'Subject', 'OTP', 'Verification Link', 'Body']);
+  // Generate new temp email
+  const domain = JSON.parse(UrlFetchApp.fetch("https://api.mail.tm/domains").getContentText()).hydra:member[0].domain;
+  const username = "user" + Math.floor(Math.random() * 100000);
+  const email = `${username}@${domain}`;
+  const password = "password123";
 
-  const domains = JSON.parse(UrlFetchApp.fetch('https://api.mail.tm/domains').getContentText());
-  const domain = domains['hydra:member'][0].domain;
-
-  const email = 'temp' + Math.floor(Math.random() * 100000) + '@' + domain;
-  const password = 'Test1234!';
-
-  UrlFetchApp.fetch('https://api.mail.tm/accounts', {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify({ address: email, password }),
-    muteHttpExceptions: true
+  // Register
+  UrlFetchApp.fetch("https://api.mail.tm/accounts", {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify({ address: email, password: password })
   });
 
-  const loginResponse = UrlFetchApp.fetch('https://api.mail.tm/token', {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify({ address: email, password })
+  // Authenticate
+  const tokenResp = UrlFetchApp.fetch("https://api.mail.tm/token", {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify({ address: email, password: password })
   });
-  const loginData = JSON.parse(loginResponse.getContentText());
-  token = loginData.token;
-  account.email = email;
-  account.password = password;
+  const token = JSON.parse(tokenResp.getContentText()).token;
 
-  const now = new Date();
-  sheet.appendRow(['INIT', now, email, '', '', '', '', '']);
-  logHistory.push(`[${now.toLocaleString()}] Monitoring started. Email: ${email}`);
+  tempEmailData.email = email;
+  tempEmailData.token = token;
+  tempEmailData.seenIds = [];
+  tempEmailData.log = `Monitoring started at ${new Date().toLocaleString()}\nEmail: ${email}\n`;
 
-  ScriptApp.newTrigger('pollInbox')
+  monitorInterval = ScriptApp.newTrigger("checkInbox")
     .timeBased()
-    .everyMinutes(1)
+    .everyMinutes(1) // Google doesn't allow sub-minute triggers
     .create();
 
-  return { email, log: logHistory.join('\n') };
-}
-
-function pollInbox() {
-  if (!token) return;
-
-  const inbox = UrlFetchApp.fetch('https://api.mail.tm/messages', {
-    method: 'get',
-    headers: { Authorization: 'Bearer ' + token }
-  });
-  const messages = JSON.parse(inbox.getContentText())['hydra:member'];
-
-  if (messages.length === 0 || messages[0].id === lastMessageId) return;
-
-  const msg = messages[0];
-  lastMessageId = msg.id;
-
-  const details = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
-    method: 'get',
-    headers: { Authorization: 'Bearer ' + token }
-  });
-  const content = JSON.parse(details.getContentText());
-
-  const timestamp = content.createdAt;
-  const sender = content.from.address;
-  const subject = content.subject;
-  const body = content.text;
-
-  const otp = extractOTP(body);
-  const link = extractVerificationLink(body);
-
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  sheet.appendRow([
-    'EMAIL', timestamp, account.email, sender, subject,
-    otp || 'NULL', link || 'NULL', body
-  ]);
-
-  const logLine = `[${new Date().toLocaleTimeString()}] Email from ${sender} | OTP: ${otp || 'NULL'} | Link: ${link || 'NULL'}`;
-  logHistory.push(logLine);
-}
-
-function extractOTP(text) {
-  const match = text.match(/\b\d{4,8}\b/);
-  return match ? match[0] : '';
-}
-
-function extractVerificationLink(text) {
-  const match = text.match(/https?:\/\/[^\s]*(verify|action)[^\s]*/i);
-  return match ? match[0] : '';
-}
-
-function getLiveLog() {
-  return logHistory.join('\n');
+  return { email, status: "Monitoring started" };
 }
 
 function stopMonitoring() {
-  const allTriggers = ScriptApp.getProjectTriggers();
-  for (let t of allTriggers) {
-    if (t.getHandlerFunction() === 'pollInbox') {
-      ScriptApp.deleteTrigger(t);
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(trigger => {
+    if (trigger.getHandlerFunction() === "checkInbox") {
+      ScriptApp.deleteTrigger(trigger);
     }
-  }
-  logHistory.push(`[${new Date().toLocaleString()}] Monitoring stopped.`);
-  return { stopped: true, log: logHistory.join('\n') };
+  });
+
+  monitorInterval = null;
+  tempEmailData.log += `Monitoring stopped at ${new Date().toLocaleString()}\n`;
+  return { status: "Stopped" };
 }
+
+function getLiveLog() {
+  return tempEmailData.log || "No logs yet.";
+}
+
+function checkInbox() {
+  const token = tempEmailData.token;
+  if (!token) return;
+
+  const headers = { Authorization: `Bearer ${token}` };
+  const inboxResp = UrlFetchApp.fetch("https://api.mail.tm/messages", { headers });
+  const messages = JSON.parse(inboxResp.getContentText()).hydra:member;
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+
+  messages.forEach(msg => {
+    if (!tempEmailData.seenIds.includes(msg.id)) {
+      tempEmailData.seenIds.push(msg.id);
+
+      const msgResp = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, { headers });
+      const msgData = JSON.parse(msgResp.getContentText());
+      const body = msgData.text;
+
+      const otpMatch = body.match(/\b\d{6}\b/);
+      const linkMatch = body.match(/https:\/\/elevenlabs\.io\/[^\s)]+/);
+
+      const otp = otpMatch ? otpMatch[0] : "NULL";
+      const link = linkMatch ? linkMatch[0] : "NULL";
+
+      // Log in spreadsheet
+      sheet.appendRow([new Date(), msg.subject, otp, link]);
+
+      // Log in HTML
+      tempEmailData.log += `\n[${new Date().toLocaleTimeString()}]\nSubject: ${msg.subject}\nOTP: ${otp}\nVerification Link: ${link}\n---\n`;
+    }
+  });
+}
+
+
+
+
+
+
+
+
+
+
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+      #log {
+        white-space: pre-wrap;
+        background: #f4f4f4;
+        border: 1px solid #ccc;
+        padding: 10px;
+        max-height: 400px;
+        overflow-y: auto;
+        font-size: 14px;
+      }
+      button {
+        margin-top: 10px;
+        margin-right: 10px;
+      }
+    </style>
+    <script>
+      function updateLog() {
+        google.script.run.withSuccessHandler(function(logText) {
+          document.getElementById("log").textContent = logText;
+        }).getLiveLog();
+      }
+
+      function startMonitoring() {
+        google.script.run.withSuccessHandler(function(data) {
+          document.getElementById("email").textContent = "Temp Email: " + data.email;
+          updateLog();
+        }).startMonitoring();
+      }
+
+      function stopMonitoring() {
+        google.script.run.withSuccessHandler(function(data) {
+          updateLog();
+          alert("Monitoring stopped.");
+        }).stopMonitoring();
+      }
+
+      setInterval(updateLog, 3000);
+      window.onload = updateLog;
+    </script>
+  </head>
+  <body>
+    <h2>Temp Mail Monitor</h2>
+    <div id="email"></div>
+    <button onclick="startMonitoring()">Start Monitoring</button>
+    <button onclick="stopMonitoring()">Stop Monitoring</button>
+    <h3>Live Log:</h3>
+    <div id="log">(Log will appear here...)</div>
+  </body>
+</html>
