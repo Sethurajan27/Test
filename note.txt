@@ -6,13 +6,55 @@ https://script.google.com/u/0/home/projects/create?parent=1UFb8AUUZyp5KYaFIxANlq
 
 
 
-// Called by frontend every 10 seconds
+const emailDomain = '1secmail.com';
+const TRIGGER_FUNCTION = 'pollInbox';
+
+// Serve HTML page
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Page')
+    .setTitle('1SecMail Monitor')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// Create or get the 'Inbox' sheet
+function getInboxSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('Inbox');
+  if (!sheet) {
+    sheet = ss.insertSheet('Inbox');
+    sheet.appendRow(['Email ID', 'Timestamp', 'Sender', 'OTP', 'Inbox Content']);
+  }
+  return sheet;
+}
+
+// Start monitoring: generate email and store it
+function startMonitoring() {
+  const login = Utilities.getUuid().split('-')[0];
+  const email = `${login}@${emailDomain}`;
+  PropertiesService.getScriptProperties().setProperty('email', email);
+  PropertiesService.getScriptProperties().setProperty('running', 'true');
+  getInboxSheet(); // Ensure sheet exists
+  return email;
+}
+
+// Stop monitoring and clear interval triggers
+function stopMonitoring() {
+  PropertiesService.getScriptProperties().setProperty('running', 'false');
+  const allTriggers = ScriptApp.getProjectTriggers();
+  allTriggers.forEach(trigger => {
+    if (trigger.getHandlerFunction() === TRIGGER_FUNCTION) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+}
+
+// Poll inbox manually (triggered by frontend every 10 seconds)
 function pollInboxFast() {
   const isRunning = PropertiesService.getScriptProperties().getProperty('running');
-  if (isRunning !== 'true') return { status: 'Stopped' };
+  if (isRunning !== 'true') return { status: 'Monitoring is off' };
 
   const email = PropertiesService.getScriptProperties().getProperty('email');
-  if (!email) return { status: 'No email' };
+  if (!email) return { status: 'No email initialized' };
 
   const [login, domain] = email.split('@');
   const listUrl = `https://www.1secmail.com/api/v1/?action=getMessages&login=${login}&domain=${domain}`;
@@ -38,13 +80,12 @@ function pollInboxFast() {
         otp,
         content
       ]);
-
       newCount++;
     }
   });
 
   return {
-    status: `Checked at ${new Date().toLocaleTimeString()}, ${newCount} new message(s)`,
+    status: `Checked inbox at ${new Date().toLocaleTimeString()} — ${newCount} new message(s)`,
     email: email
   };
 }
@@ -58,40 +99,86 @@ function pollInboxFast() {
 
 
 
-<script>
-  let intervalID = null;
 
-  function log(msg) {
-    const logDiv = document.getElementById('log');
-    logDiv.textContent += '\n' + msg;
-    logDiv.scrollTop = logDiv.scrollHeight;
-  }
 
-  function start() {
-    log("Starting monitor...");
-    google.script.run.withSuccessHandler(function(email) {
-      document.getElementById('email').textContent = "Email: " + email;
-      log("Monitoring started for: " + email);
-      // Start polling every 10 seconds
-      intervalID = setInterval(checkInbox, 10000); // 10,000 ms = 10 sec
-    }).startMonitoring();
-  }
-
-  function stop() {
-    google.script.run.stopMonitoring();
-    document.getElementById('email').textContent = "Monitoring stopped.";
-    log("Monitoring stopped by user.");
-    clearInterval(intervalID);
-  }
-
-  function checkInbox() {
-    google.script.run.withSuccessHandler(function(result) {
-      if (result && result.status) {
-        log(result.status);
-        if (result.email) {
-          document.getElementById('email').textContent = "Email: " + result.email;
-        }
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+        background: #f9f9f9;
       }
-    }).pollInboxFast();
-  }
-</script>
+      h2 {
+        margin-bottom: 10px;
+      }
+      button {
+        margin: 5px;
+        padding: 10px 20px;
+        font-size: 14px;
+      }
+      #email {
+        font-weight: bold;
+        margin-top: 10px;
+        font-size: 16px;
+      }
+      #log {
+        margin-top: 20px;
+        background: #fff;
+        padding: 10px;
+        border: 1px solid #ccc;
+        height: 300px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>📥 1SecMail Inbox Monitor</h2>
+    <button onclick="start()">▶ Start Monitoring</button>
+    <button onclick="stop()">⏹ Stop Monitoring</button>
+
+    <div id="email">Email: Not started</div>
+    <div id="log">Status: Waiting to start...</div>
+
+    <script>
+      let intervalID = null;
+
+      function log(msg) {
+        const logDiv = document.getElementById('log');
+        const timestamp = new Date().toLocaleTimeString();
+        logDiv.textContent += `\n[${timestamp}] ${msg}`;
+        logDiv.scrollTop = logDiv.scrollHeight;
+      }
+
+      function start() {
+        log("Requesting to start monitoring...");
+        google.script.run.withSuccessHandler(function(email) {
+          document.getElementById('email').textContent = "Email: " + email;
+          log("Monitoring started for: " + email);
+          intervalID = setInterval(checkInbox, 10000); // every 10 sec
+        }).startMonitoring();
+      }
+
+      function stop() {
+        google.script.run.stopMonitoring();
+        document.getElementById('email').textContent = "Monitoring stopped.";
+        log("Monitoring stopped by user.");
+        clearInterval(intervalID);
+      }
+
+      function checkInbox() {
+        google.script.run.withSuccessHandler(function(result) {
+          if (result && result.status) {
+            log(result.status);
+          } else {
+            log("No response from server.");
+          }
+        }).pollInboxFast();
+      }
+    </script>
+  </body>
+</html>
