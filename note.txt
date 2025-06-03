@@ -1,97 +1,104 @@
-const emailDomain = '1secmail.com';
-const TRIGGER_FUNCTION = 'pollInboxFast';
+let token = '';
+let account = {};
+let lastMessageId = '';
 
-// Serve the HTML UI
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Page')
-    .setTitle('1SecMail Monitor')
+    .setTitle('Mail.tm Inbox Monitor')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-// Get or create the Inbox sheet
-function getInboxSheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName('Inbox');
-  if (!sheet) {
-    sheet = ss.insertSheet('Inbox');
-  }
-  return sheet;
-}
-
-// Start monitoring and return generated email
 function startMonitoring() {
-  const login = Utilities.getUuid().split('-')[0];
-  const email = `${login}@${emailDomain}`;
-  const timestamp = new Date().toLocaleString();
+  token = '';
+  account = {};
+  lastMessageId = '';
 
-  PropertiesService.getScriptProperties().setProperty('email', email);
-  PropertiesService.getScriptProperties().setProperty('running', 'true');
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  sheet.clear();
+  sheet.appendRow(['Mail Address', 'Timestamp', 'Sender', 'Subject', 'OTP', 'Body']);
 
-  const sheet = getInboxSheet();
-  sheet.appendRow(['--- Monitoring Started ---', timestamp, email, '', '']);
-  sheet.appendRow(['Email ID', 'Timestamp', 'Sender', 'OTP', 'Inbox Content']);
+  // Generate email & get token
+  const domain = UrlFetchApp.fetch('https://api.mail.tm/domains').getContentText();
+  const domainName = JSON.parse(domain)['hydra:member'][0].domain;
 
-  return email;
-}
+  const email = 'temp' + Math.floor(Math.random() * 100000) + '@' + domainName;
+  const password = 'Test1234!';
 
-// Stop the monitoring
-function stopMonitoring() {
-  PropertiesService.getScriptProperties().setProperty('running', 'false');
-  const allTriggers = ScriptApp.getProjectTriggers();
-  allTriggers.forEach(trigger => {
-    if (trigger.getHandlerFunction() === TRIGGER_FUNCTION) {
-      ScriptApp.deleteTrigger(trigger);
-    }
+  UrlFetchApp.fetch('https://api.mail.tm/accounts', {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ address: email, password: password }),
+    muteHttpExceptions: true
   });
+
+  const login = UrlFetchApp.fetch('https://api.mail.tm/token', {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({ address: email, password: password })
+  });
+
+  const loginData = JSON.parse(login.getContentText());
+  token = loginData.token;
+  account.email = email;
+  account.password = password;
+
+  // Log the mail ID once
+  sheet.appendRow([email, new Date(), '', '', '', '']);
+
+  ScriptApp.newTrigger('pollInbox')
+    .timeBased()
+    .everyMinutes(1)
+    .create();
+
+  return { email };
 }
 
-// Poll inbox for new messages
-function pollInboxFast() {
-  const isRunning = PropertiesService.getScriptProperties().getProperty('running');
-  if (isRunning !== 'true') return { status: 'Monitoring is off' };
+function pollInbox() {
+  if (!token) return;
 
-  const email = PropertiesService.getScriptProperties().getProperty('email');
-  if (!email) return { status: 'No email generated yet' };
-
-  const [login, domain] = email.split('@');
-  const listUrl = `https://www.1secmail.com/api/v1/?action=getMessages&login=${login}&domain=${domain}`;
-  const response = UrlFetchApp.fetch(listUrl);
-  const messages = JSON.parse(response.getContentText());
-
-  const sheet = getInboxSheet();
-  let lastRow = sheet.getLastRow();
-  let existingIDs = [];
-  if (lastRow > 2) {
-    existingIDs = sheet.getRange(3, 1, lastRow - 2, 1).getValues().flat();
-  }
-
-  let newCount = 0;
-
-  messages.forEach(msg => {
-    if (!existingIDs.includes(String(msg.id))) {
-      const detailUrl = `https://www.1secmail.com/api/v1/?action=readMessage&login=${login}&domain=${domain}&id=${msg.id}`;
-      const detail = JSON.parse(UrlFetchApp.fetch(detailUrl).getContentText());
-
-      const content = detail.body || detail.textBody || '';
-      const otpMatch = content.match(/\b\d{4,8}\b/);
-      const otp = otpMatch ? otpMatch[0] : '';
-
-      sheet.appendRow([
-        msg.id,
-        detail.date,
-        detail.from,
-        otp,
-        content
-      ]);
-      newCount++;
+  const response = UrlFetchApp.fetch('https://api.mail.tm/messages', {
+    method: 'get',
+    headers: {
+      Authorization: 'Bearer ' + token
     }
   });
 
-  return {
-    status: `Checked inbox at ${new Date().toLocaleTimeString()} — ${newCount} new message(s)`,
-    email: email
-  };
+  const messages = JSON.parse(response.getContentText())['hydra:member'];
+
+  if (messages.length === 0 || messages[0].id === lastMessageId) return;
+
+  const messageId = messages[0].id;
+  lastMessageId = messageId;
+
+  const messageDetails = UrlFetchApp.fetch(`https://api.mail.tm/messages/${messageId}`, {
+    method: 'get',
+    headers: {
+      Authorization: 'Bearer ' + token
+    }
+  });
+
+  const msg = JSON.parse(messageDetails.getContentText());
+  const sender = msg.from.address;
+  const subject = msg.subject;
+  const body = msg.text;
+  const timestamp = msg.createdAt;
+
+  const otp = extractOTP(body);
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  sheet.appendRow(['', timestamp, sender, subject, otp, body]);
 }
+
+function extractOTP(text) {
+  const match = text.match(/\b\d{4,8}\b/);
+  return match ? match[0] : '';
+}
+
+function getEmailAddress() {
+  return account.email || '';
+}
+
+
 
 
 
@@ -107,76 +114,23 @@ function pollInboxFast() {
   <head>
     <base target="_top">
     <style>
-      body {
-        font-family: Arial, sans-serif;
-        padding: 20px;
-        background: #f0f0f0;
-      }
-      button {
-        margin: 10px 5px;
-        padding: 10px 20px;
-        font-size: 14px;
-        cursor: pointer;
-      }
-      #email {
-        font-weight: bold;
-        margin-top: 15px;
-        font-size: 16px;
-      }
-      #log {
-        margin-top: 20px;
-        background: white;
-        border: 1px solid #ccc;
-        padding: 10px;
-        height: 300px;
-        overflow-y: scroll;
-        font-family: monospace;
-        white-space: pre-wrap;
-        font-size: 13px;
-      }
+      body { font-family: Arial; padding: 20px; }
+      .log { margin-top: 20px; white-space: pre-wrap; background: #f5f5f5; padding: 10px; border-radius: 5px; }
     </style>
   </head>
   <body>
-    <h2>📬 1SecMail OTP Monitor</h2>
-    <button onclick="start()">▶ Start Monitoring</button>
-    <button onclick="stop()">⏹ Stop Monitoring</button>
-    <div id="email">Email: Not started</div>
-    <div id="log">Status: Waiting to start...</div>
+    <h2>Mail.tm Inbox Monitor</h2>
+    <button onclick="start()">Start Monitoring</button>
+    <div class="log" id="log"></div>
 
     <script>
-      let intervalID = null;
-
-      function log(msg) {
-        const logEl = document.getElementById('log');
-        const now = new Date().toLocaleTimeString();
-        logEl.textContent += `\n[${now}] ${msg}`;
-        logEl.scrollTop = logEl.scrollHeight;
-      }
-
       function start() {
-        log("Starting monitoring...");
-        google.script.run.withSuccessHandler(function(email) {
-          document.getElementById('email').textContent = "Email: " + email;
-          log("Monitoring started for: " + email);
-          intervalID = setInterval(checkInbox, 15000); // every 15 sec
-        }).startMonitoring();
+        document.getElementById("log").innerText = "Starting...";
+        google.script.run.withSuccessHandler(updateUI).startMonitoring();
       }
 
-      function stop() {
-        google.script.run.stopMonitoring();
-        clearInterval(intervalID);
-        log("Monitoring stopped.");
-        document.getElementById('email').textContent = "Email: Monitoring stopped.";
-      }
-
-      function checkInbox() {
-        google.script.run.withSuccessHandler(function(result) {
-          if (result && result.status) {
-            log(result.status);
-          } else {
-            log("No response from server.");
-          }
-        }).pollInboxFast();
+      function updateUI(data) {
+        document.getElementById("log").innerText = `Monitoring started.\nMail ID: ${data.email}\n\nCheck your inbox by sending test emails to this address. Logs will appear in your Google Sheet.`;
       }
     </script>
   </body>
