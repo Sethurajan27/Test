@@ -1,11 +1,3 @@
-https://script.google.com/u/0/home/projects/create?parent=1UFb8AUUZyp5KYaFIxANlqja0qvO_MO80UJmSEolDSxk&pli=1
-
-
-
-
-
-
-
 const emailDomain = '1secmail.com';
 const TRIGGER_FUNCTION = 'pollInbox';
 
@@ -22,7 +14,6 @@ function getInboxSheet() {
   let sheet = ss.getSheetByName('Inbox');
   if (!sheet) {
     sheet = ss.insertSheet('Inbox');
-    sheet.appendRow(['Email ID', 'Timestamp', 'Sender', 'OTP', 'Inbox Content']);
   }
   return sheet;
 }
@@ -31,13 +22,19 @@ function getInboxSheet() {
 function startMonitoring() {
   const login = Utilities.getUuid().split('-')[0];
   const email = `${login}@${emailDomain}`;
+  const timestamp = new Date().toLocaleString();
+
   PropertiesService.getScriptProperties().setProperty('email', email);
   PropertiesService.getScriptProperties().setProperty('running', 'true');
-  getInboxSheet(); // Ensure sheet exists
+
+  const sheet = getInboxSheet();
+  sheet.appendRow(['--- Monitoring Started ---', timestamp, email, '', '']);
+  sheet.appendRow(['Email ID', 'Timestamp', 'Sender', 'OTP', 'Inbox Content']);
+
   return email;
 }
 
-// Stop monitoring and clear interval triggers
+// Stop monitoring
 function stopMonitoring() {
   PropertiesService.getScriptProperties().setProperty('running', 'false');
   const allTriggers = ScriptApp.getProjectTriggers();
@@ -89,8 +86,6 @@ function pollInboxFast() {
     email: email
   };
 }
-
-
 
 
 
