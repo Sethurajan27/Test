@@ -1,6 +1,6 @@
 let token = '';
 let account = {};
-let seenMessageIds = new Set();
+let lastMessageIds = new Set();
 let triggerId = '';
 let logHistory = [];
 
@@ -13,18 +13,21 @@ function doGet() {
 function startMonitoring() {
   token = '';
   account = {};
-  seenMessageIds = new Set();
+  lastMessageIds = new Set();
   logHistory = [];
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   sheet.clear();
   sheet.appendRow(['Type', 'Timestamp', 'Email Address', 'Sender', 'Subject', 'OTP', 'Verification Link', 'Body']);
 
+  // Get domain
   const domains = JSON.parse(UrlFetchApp.fetch('https://api.mail.tm/domains').getContentText());
   const domain = domains['hydra:member'][0].domain;
+
   const email = 'temp' + Math.floor(Math.random() * 100000) + '@' + domain;
   const password = 'Test1234!';
 
+  // Register account
   UrlFetchApp.fetch('https://api.mail.tm/accounts', {
     method: 'post',
     contentType: 'application/json',
@@ -32,11 +35,13 @@ function startMonitoring() {
     muteHttpExceptions: true
   });
 
+  // Login
   const loginResponse = UrlFetchApp.fetch('https://api.mail.tm/token', {
     method: 'post',
     contentType: 'application/json',
     payload: JSON.stringify({ address: email, password: password })
   });
+
   const loginData = JSON.parse(loginResponse.getContentText());
   token = loginData.token;
   account.email = email;
@@ -46,9 +51,10 @@ function startMonitoring() {
   sheet.appendRow(['INIT', now, email, '', '', '', '', '']);
   logHistory.push(`[${now.toLocaleString()}] Monitoring started. Email: ${email}`);
 
+  // Trigger every minute
   const trigger = ScriptApp.newTrigger('pollInbox')
     .timeBased()
-    .everyMinutes(1) // Minimum interval allowed by Apps Script
+    .everyMinutes(1)
     .create();
   triggerId = trigger.getUniqueId();
 
@@ -65,10 +71,10 @@ function pollInbox() {
   const messages = JSON.parse(inbox.getContentText())['hydra:member'];
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
 
-  messages.forEach(msg => {
-    if (seenMessageIds.has(msg.id)) return;
+  for (let msg of messages) {
+    if (lastMessageIds.has(msg.id)) continue;
+    lastMessageIds.add(msg.id);
 
-    seenMessageIds.add(msg.id);
     const details = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
       method: 'get',
       headers: { Authorization: 'Bearer ' + token }
@@ -79,24 +85,25 @@ function pollInbox() {
     const sender = content.from.address;
     const subject = content.subject;
     const body = content.text;
+
     const otp = extractOTP(body) || 'NULL';
-    const verificationLink = extractVerificationLink(body) || 'NULL';
+    const vlink = extractVerificationLink(body) || 'NULL';
 
-    sheet.appendRow(['EMAIL', timestamp, account.email, sender, subject, otp, verificationLink, body]);
+    sheet.appendRow(['EMAIL', timestamp, account.email, sender, subject, otp, vlink, body]);
 
-    const logLine = `[${new Date().toLocaleTimeString()}] From ${sender}, OTP: ${otp}, Link: ${verificationLink}`;
+    const logLine = `[${new Date().toLocaleTimeString()}] Email from ${sender} | OTP: ${otp} | Link: ${vlink}`;
     logHistory.push(logLine);
-  });
+  }
 }
 
 function extractOTP(text) {
   const match = text.match(/\b\d{4,8}\b/);
-  return match ? match[0] : '';
+  return match ? match[0] : null;
 }
 
 function extractVerificationLink(text) {
   const match = text.match(/https:\/\/[^\s"]*verify[^\s"]*/i);
-  return match ? match[0] : '';
+  return match ? match[0] : null;
 }
 
 function getLiveLog() {
@@ -110,10 +117,10 @@ function stopMonitoring() {
       ScriptApp.deleteTrigger(t);
     }
   }
-  const time = new Date().toLocaleString();
-  logHistory.push(`[${time}] Monitoring stopped.`);
+  logHistory.push(`[${new Date().toLocaleString()}] Monitoring stopped.`);
   return { stopped: true, log: logHistory.join('\n') };
 }
+
 
 
 
@@ -131,39 +138,58 @@ function stopMonitoring() {
     <base target="_top">
     <style>
       body { font-family: Arial; padding: 20px; }
-      button { margin-right: 10px; padding: 10px 15px; }
-      #log { white-space: pre-wrap; background: #f0f0f0; padding: 10px; margin-top: 20px; border-radius: 6px; height: 400px; overflow-y: scroll; }
+      button { margin-right: 10px; }
+      #log {
+        white-space: pre-wrap;
+        background: #f9f9f9;
+        padding: 10px;
+        border-radius: 6px;
+        margin-top: 20px;
+        height: 400px;
+        overflow-y: auto;
+        border: 1px solid #ccc;
+      }
     </style>
   </head>
   <body>
-    <h2>📬 Mail.tm Inbox Monitor</h2>
+    <h2>Mail.tm Inbox Monitor</h2>
     <button onclick="start()">Start Monitoring</button>
     <button onclick="stop()">Stop Monitoring</button>
     <div id="log">Press "Start Monitoring" to begin...</div>
 
     <script>
-      let interval;
+      let polling = null;
 
       function start() {
         document.getElementById('log').innerText = 'Starting monitor...';
-        google.script.run.withSuccessHandler(updateLog).startMonitoring();
-        if (!interval) {
-          interval = setInterval(() => {
-            google.script.run.withSuccessHandler(log => {
-              document.getElementById('log').innerText = log;
-            }).getLiveLog();
-          }, 10000); // every 10 seconds
-        }
+        google.script.run.withSuccessHandler(data => {
+          updateLog(data.log);
+          startPolling();
+        }).startMonitoring();
       }
 
       function stop() {
-        clearInterval(interval);
-        interval = null;
-        google.script.run.withSuccessHandler(updateLog).stopMonitoring();
+        google.script.run.withSuccessHandler(data => {
+          updateLog(data.log);
+          stopPolling();
+        }).stopMonitoring();
       }
 
-      function updateLog(data) {
-        document.getElementById('log').innerText = data.log || 'Done.';
+      function updateLog(text) {
+        const logDiv = document.getElementById('log');
+        logDiv.innerText = text;
+        logDiv.scrollTop = logDiv.scrollHeight;
+      }
+
+      function startPolling() {
+        if (polling) clearInterval(polling);
+        polling = setInterval(() => {
+          google.script.run.withSuccessHandler(updateLog).getLiveLog();
+        }, 5000); // update every 5 sec
+      }
+
+      function stopPolling() {
+        if (polling) clearInterval(polling);
       }
     </script>
   </body>
