@@ -1,14 +1,14 @@
 const emailDomain = '1secmail.com';
-const TRIGGER_FUNCTION = 'pollInbox';
+const TRIGGER_FUNCTION = 'pollInboxFast';
 
-// Serve HTML page
+// Serve the HTML UI
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Page')
     .setTitle('1SecMail Monitor')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-// Create or get the 'Inbox' sheet
+// Get or create the Inbox sheet
 function getInboxSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName('Inbox');
@@ -18,7 +18,7 @@ function getInboxSheet() {
   return sheet;
 }
 
-// Start monitoring: generate email and store it
+// Start monitoring and return generated email
 function startMonitoring() {
   const login = Utilities.getUuid().split('-')[0];
   const email = `${login}@${emailDomain}`;
@@ -34,7 +34,7 @@ function startMonitoring() {
   return email;
 }
 
-// Stop monitoring
+// Stop the monitoring
 function stopMonitoring() {
   PropertiesService.getScriptProperties().setProperty('running', 'false');
   const allTriggers = ScriptApp.getProjectTriggers();
@@ -45,20 +45,26 @@ function stopMonitoring() {
   });
 }
 
-// Poll inbox manually (triggered by frontend every 10 seconds)
+// Poll inbox for new messages
 function pollInboxFast() {
   const isRunning = PropertiesService.getScriptProperties().getProperty('running');
   if (isRunning !== 'true') return { status: 'Monitoring is off' };
 
   const email = PropertiesService.getScriptProperties().getProperty('email');
-  if (!email) return { status: 'No email initialized' };
+  if (!email) return { status: 'No email generated yet' };
 
   const [login, domain] = email.split('@');
   const listUrl = `https://www.1secmail.com/api/v1/?action=getMessages&login=${login}&domain=${domain}`;
-  const messages = JSON.parse(UrlFetchApp.fetch(listUrl).getContentText());
+  const response = UrlFetchApp.fetch(listUrl);
+  const messages = JSON.parse(response.getContentText());
 
   const sheet = getInboxSheet();
-  const existingIDs = sheet.getRange(2, 1, sheet.getLastRow(), 1).getValues().flat();
+  let lastRow = sheet.getLastRow();
+  let existingIDs = [];
+  if (lastRow > 2) {
+    existingIDs = sheet.getRange(3, 1, lastRow - 2, 1).getValues().flat();
+  }
+
   let newCount = 0;
 
   messages.forEach(msg => {
@@ -104,38 +110,36 @@ function pollInboxFast() {
       body {
         font-family: Arial, sans-serif;
         padding: 20px;
-        background: #f9f9f9;
-      }
-      h2 {
-        margin-bottom: 10px;
+        background: #f0f0f0;
       }
       button {
-        margin: 5px;
+        margin: 10px 5px;
         padding: 10px 20px;
         font-size: 14px;
+        cursor: pointer;
       }
       #email {
         font-weight: bold;
-        margin-top: 10px;
+        margin-top: 15px;
         font-size: 16px;
       }
       #log {
         margin-top: 20px;
-        background: #fff;
-        padding: 10px;
+        background: white;
         border: 1px solid #ccc;
+        padding: 10px;
         height: 300px;
-        overflow-y: auto;
+        overflow-y: scroll;
+        font-family: monospace;
         white-space: pre-wrap;
         font-size: 13px;
       }
     </style>
   </head>
   <body>
-    <h2>📥 1SecMail Inbox Monitor</h2>
+    <h2>📬 1SecMail OTP Monitor</h2>
     <button onclick="start()">▶ Start Monitoring</button>
     <button onclick="stop()">⏹ Stop Monitoring</button>
-
     <div id="email">Email: Not started</div>
     <div id="log">Status: Waiting to start...</div>
 
@@ -143,26 +147,26 @@ function pollInboxFast() {
       let intervalID = null;
 
       function log(msg) {
-        const logDiv = document.getElementById('log');
-        const timestamp = new Date().toLocaleTimeString();
-        logDiv.textContent += `\n[${timestamp}] ${msg}`;
-        logDiv.scrollTop = logDiv.scrollHeight;
+        const logEl = document.getElementById('log');
+        const now = new Date().toLocaleTimeString();
+        logEl.textContent += `\n[${now}] ${msg}`;
+        logEl.scrollTop = logEl.scrollHeight;
       }
 
       function start() {
-        log("Requesting to start monitoring...");
+        log("Starting monitoring...");
         google.script.run.withSuccessHandler(function(email) {
           document.getElementById('email').textContent = "Email: " + email;
           log("Monitoring started for: " + email);
-          intervalID = setInterval(checkInbox, 10000); // every 10 sec
+          intervalID = setInterval(checkInbox, 15000); // every 15 sec
         }).startMonitoring();
       }
 
       function stop() {
         google.script.run.stopMonitoring();
-        document.getElementById('email').textContent = "Monitoring stopped.";
-        log("Monitoring stopped by user.");
         clearInterval(intervalID);
+        log("Monitoring stopped.");
+        document.getElementById('email').textContent = "Email: Monitoring stopped.";
       }
 
       function checkInbox() {
