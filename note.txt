@@ -10,7 +10,7 @@ function startMonitoring() {
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   sheet.clear();
-  sheet.appendRow(['Type', 'Timestamp', 'Email Address', 'Sender', 'Subject', 'OTP', 'Body']);
+  sheet.appendRow(['Type', 'Timestamp', 'Email Address', 'Sender', 'Subject', 'OTP', 'Verification Link', 'Body']);
 
   const domains = JSON.parse(UrlFetchApp.fetch('https://api.mail.tm/domains').getContentText());
   const domain = domains['hydra:member'][0].domain;
@@ -78,19 +78,26 @@ function pollInbox() {
   const sender = content.from.address;
   const subject = content.subject;
   const body = content.text;
+
   const otp = extractOTP(body);
+  const link = extractVerificationLink(body);
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  sheet.appendRow(['EMAIL', timestamp, email, sender, subject, otp, body]);
+  sheet.appendRow(['EMAIL', timestamp, email, sender, subject, otp, link, body]);
 
-  const logLine = `[${new Date().toLocaleTimeString()}] New email from ${sender} with OTP: ${otp}`;
+  const logLine = `[${new Date().toLocaleTimeString()}] New email from ${sender}\n- OTP: ${otp}\n- Link: ${link}`;
   logs.push(logLine);
   props.setProperty('LOG', JSON.stringify(logs));
 }
 
 function extractOTP(text) {
   const match = text.match(/\b\d{4,8}\b/);
-  return match ? match[0] : '';
+  return match ? match[0] : 'NULL';
+}
+
+function extractVerificationLink(text) {
+  const match = text.match(/https:\/\/[^\s]+/);
+  return match ? match[0] : 'NULL';
 }
 
 function getLiveLog() {
@@ -114,11 +121,6 @@ function stopMonitoring() {
   props.setProperty('LOG', JSON.stringify(logs));
   return { stopped: true, log: logs.join('\n') };
 }
-
-
-
-
-
 
 
 
