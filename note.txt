@@ -39,4 +39,6 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: news-login-screenshots
-          path: *.png
+          path: |
+            news_login_success.png
+            login_error.png
