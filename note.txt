@@ -1,48 +1,228 @@
-import pytest
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-from src.news_login import news_login, init_driver
+openai
+requests
+python-dotenv
+selenium
+pydrive
 
-@pytest.fixture(scope="module")
-def driver():
-    """Fixture to initialize and quit WebDriver"""
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    driver = webdriver.Chrome(
-        ChromeDriverManager().install(),
-        options=chrome_options
+
+
+
+ELEVENLABS_API_KEY=your_elevenlabs_api_key
+GOOGLE_DRIVE_FOLDER_ID=your_google_drive_folder_id
+OPENAI_API_KEY=your_openai_api_key
+HEADLESS=true
+
+
+
+
+
+import os
+from dotenv import load_dotenv
+
+def get_config():
+    load_dotenv()
+    return {
+        'elevenlabs_api_key': os.getenv('ELEVENLABS_API_KEY'),
+        'google_drive_folder_id': os.getenv('GOOGLE_DRIVE_FOLDER_ID'),
+        'openai_api_key': os.getenv('OPENAI_API_KEY'),
+        'headless': os.getenv('HEADLESS', 'true').lower() == 'true'
+    }
+
+
+
+
+
+
+from datetime import datetime
+
+def format_prompt(time_range, greeting, topics):
+    today = datetime.now().strftime("%Y-%m-%d")
+    return f"""
+{greeting}
+{today} நாட்காட்டியில் {time_range} வரை இந்தியாவிலிருந்து கிடைத்த முக்கிய செய்திகள்:
+
+{topics}
+
+இன்றைய வசனம்: "உழைப்பவன் கனவு தான் நாளைய நிஜம்."
+இது போல தினசரி செய்திகள் தெரிந்துகொள்ள like, share, subscribe மற்றும் comment செய்யுங்கள்.
+"""
+
+def get_all_prompts():
+    return [
+        {
+            "title": "Morning",
+            "filename": "morning_news.mp3",
+            "prompt": format_prompt(
+                "00:00:00 to 07:00:00",
+                "வணக்கம்! இன்று காலை நேரம், இந்தியாவில் நடந்த முக்கிய நிகழ்வுகள் இதோ:",
+                "அரசியல், தேசிய பாதுகாப்பு, பொருளாதாரம், கல்வி, தொழில், சுகாதாரம், மற்றும் பொது செய்திகள்"
+            )
+        },
+        {
+            "title": "Afternoon",
+            "filename": "afternoon_news.mp3",
+            "prompt": format_prompt(
+                "07:00:00 to 13:00:00",
+                "வணக்கம்! இன்று மதிய நேரத்தில் இந்தியாவில் பதிவான முக்கிய செய்திகள் இவை:",
+                "அரசியல், கல்வி, பொருளாதாரம், தொழில், மக்கள் நலன், மற்றும் பொது நிகழ்வுகள்"
+            )
+        },
+        {
+            "title": "Evening",
+            "filename": "evening_news.mp3",
+            "prompt": format_prompt(
+                "13:00:00 to 19:00:00",
+                "மாலை வணக்கம்! இன்று மாலை இந்தியாவில் நிகழ்ந்த முக்கிய செய்திகள் இதோ:",
+                "அரசியல், தொழில், தேசிய செய்திகள், கல்வி, மக்கள் நலன், மற்றும் பொது நிகழ்வுகள்"
+            )
+        },
+        {
+            "title": "Night",
+            "filename": "night_news.mp3",
+            "prompt": format_prompt(
+                "19:00:00 to 22:30:00",
+                "இரவின் வணக்கம்! இன்று இரவு 7 மணி முதல் 10.30 மணி வரை இந்தியாவில் நடந்த முக்கிய செய்திகள்:",
+                "அரசியல், தேசிய பாதுகாப்பு, தொழில், பொது நிகழ்வுகள், கல்வி, மற்றும் சுகாதாரம்"
+            )
+        }
+    ]
+
+
+
+
+
+
+
+
+import openai
+from src.config import get_config
+
+config = get_config()
+openai.api_key = config['openai_api_key']
+
+def generate_news_text(prompt):
+    response = openai.ChatCompletion.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7
     )
-    yield driver
-    driver.quit()
+    return response['choices'][0]['message']['content']
 
-def test_successful_login(driver):
-    """Test successful login with valid credentials"""
-    test_config = {
-        'url': 'https://demo.realworld.io/#/login',
-        'username': 'testuser@example.com',
-        'password': 'password123',
-        'username_field': 'input[type="email"]',
-        'password_field': 'input[type="password"]',
-        'login_button': 'button[type="submit"]',
-        'headless': True
-    }
-    
-    assert news_login(driver, test_config) is True
-    assert "feed" in driver.current_url  # Verify redirect after login
 
-def test_failed_login(driver):
-    """Test failed login with invalid credentials"""
-    test_config = {
-        'url': 'https://demo.realworld.io/#/login',
-        'username': 'wrong@user.com',
-        'password': 'invalidpass',
-        'username_field': 'input[type="email"]',
-        'password_field': 'input[type="password"]',
-        'login_button': 'button[type="submit"]',
-        'headless': True
+
+
+
+
+
+import requests
+import time
+
+def generate_speech(api_key, text, voice_id='EXAVITQu4vr4xnSDxMaL', filename=None):
+    url = f'https://api.elevenlabs.io/v1/text-to-speech/{voice_id}'
+    headers = {
+        'xi-api-key': api_key,
+        'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg'
     }
-    
-    assert news_login(driver, test_config) is False
-    assert "login" in driver.current_url  # Still on login page
+    payload = {
+        'text': text,
+        'model_id': 'eleven_monolingual_v1',
+        'voice_settings': {
+            'stability': 0.2,
+            'similarity_boost': 0.8,
+            'style': 0.6,
+            'use_speaker_boost': True
+        }
+    }
+    response = requests.post(url, headers=headers, json=payload)
+    filename = filename or f"{int(time.time())}.mp3"
+    with open(filename, 'wb') as f:
+        f.write(response.content)
+    return filename
+
+
+
+
+
+
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
+
+def upload_to_drive(file_path, folder_id):
+    gauth = GoogleAuth()
+    gauth.LocalWebserverAuth()
+    drive = GoogleDrive(gauth)
+    file = drive.CreateFile({'title': file_path, 'parents': [{'id': folder_id}]})
+    file.SetContentFile(file_path)
+    file.Upload()
+
+
+
+
+
+
+
+
+from src.config import get_config
+from src.tts_generator import generate_speech
+from src.drive_uploader import upload_to_drive
+from src.news_generator import generate_news_text
+from prompts.tamil_news_prompts import get_all_prompts
+
+def main():
+    config = get_config()
+    prompts = get_all_prompts()
+
+    for item in prompts:
+        print(f"🔹 Generating news for: {item['title']}")
+        news_text = generate_news_text(item["prompt"])
+        print("✅ News text generated.")
+
+        mp3_file = generate_speech(config['elevenlabs_api_key'], news_text, filename=item["filename"])
+        print(f"✅ Audio saved: {mp3_file}")
+
+        upload_to_drive(mp3_file, config['google_drive_folder_id'])
+        print(f"✅ Uploaded to Google Drive: {mp3_file}\n")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+
+
+
+
+name: News Audio Automation
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run news generator
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          HEADLESS: "true"
+        run: |
+          python run.py
