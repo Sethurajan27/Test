@@ -4,7 +4,7 @@ const LOG_SHEET_NAME = 'Process Logs';
 function ensureSpreadsheet() {
   const props = PropertiesService.getScriptProperties();
   const lock = LockService.getScriptLock();
-  lock.waitLock(5000); // wait up to 5s for other processes
+  lock.waitLock(5000);
 
   let sheetId = props.getProperty('sheetId');
   let ss;
@@ -26,7 +26,7 @@ function ensureSpreadsheet() {
     ss = SpreadsheetApp.openById(sheetId);
   }
 
-  lock.releaseLock(); // important!
+  lock.releaseLock();
   return ss;
 }
 
@@ -36,8 +36,23 @@ function logProcess(msg) {
   logSheet.appendRow([new Date(), msg]);
 }
 
+function stopMonitoring() {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty('monitoring', 'false');
+  props.deleteProperty('token');
+  props.deleteProperty('email');
+
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'fetchInbox') ScriptApp.deleteTrigger(t);
+  });
+
+  logProcess("⏹ Monitoring stopped");
+  return "Monitoring stopped.";
+}
+
 function startMonitoring() {
-  logProcess("▶ Monitoring started");
+  stopMonitoring(); // ensure clean restart
+  logProcess("▶ Starting new monitoring session");
 
   const props = PropertiesService.getScriptProperties();
   props.setProperty('monitoring', 'true');
@@ -69,31 +84,15 @@ function startMonitoring() {
   const ss = ensureSpreadsheet();
   const inboxSheet = ss.getSheetByName(SHEET_NAME);
   inboxSheet.appendRow([email, new Date(), "NULL", "STARTED", "NULL", "NULL", "NULL"]);
-  logProcess("✅ STARTED row logged");
 
-  ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() === 'fetchInbox') ScriptApp.deleteTrigger(t);
-  });
+  logProcess("✅ Monitoring started with temp email: " + email);
 
   ScriptApp.newTrigger('fetchInbox')
     .timeBased()
     .everyMinutes(1)
     .create();
 
-  logProcess("⏱ Inbox polling trigger set");
-
-  return "Monitoring started.";
-}
-
-function stopMonitoring() {
-  PropertiesService.getScriptProperties().setProperty('monitoring', 'false');
-
-  ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() === 'fetchInbox') ScriptApp.deleteTrigger(t);
-  });
-
-  logProcess("⏹ Monitoring stopped");
-  return "Monitoring stopped.";
+  return email;
 }
 
 function fetchInbox() {
@@ -104,28 +103,33 @@ function fetchInbox() {
   const email = props.getProperty('email');
   const ss = ensureSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAME);
-  const existing = sheet.getDataRange().getValues();
-  const existingKeys = new Set(existing.map(r => r[1] + r[3]));
+  const existing = sheet.getRange(2, 2, sheet.getLastRow() - 1, 2).getValues(); // Timestamp + Subject
+  const existingKeys = new Set(existing.map(r => r.join('|')));
 
   const inboxRes = UrlFetchApp.fetch("https://api.mail.tm/messages", {
     headers: { Authorization: `Bearer ${token}` }
   });
 
   const messages = JSON.parse(inboxRes.getContentText())['hydra:member'];
+  if (!messages || messages.length === 0) return;
+
   logProcess(`📩 Fetched ${messages.length} messages`);
 
+  const newRows = [];
+
   messages.forEach(msg => {
-    const key = msg.createdAt + msg.subject;
+    const key = msg.createdAt + "|" + msg.subject;
     if (existingKeys.has(key)) return;
 
     const fullRes = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const full = JSON.parse(fullRes.getContentText());
+
     const otp = full.text.match(/\b\d{4,8}\b/);
     const link = full.text.match(/https?:\/\/[^\s]+/);
 
-    sheet.appendRow([
+    newRows.push([
       email,
       msg.createdAt,
       msg.from.address,
@@ -137,6 +141,10 @@ function fetchInbox() {
 
     logProcess("✅ Logged message: " + msg.subject);
   });
+
+  if (newRows.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+  }
 }
 
 function getLogs() {
@@ -158,24 +166,31 @@ function doGet() {
 }
 
 
-
-
-
-
 <!DOCTYPE html>
 <html>
 <head>
   <base target="_top">
   <style>
     body { font-family: Arial; padding: 20px; }
-    button { margin: 5px; padding: 10px 20px; font-size: 16px; }
+    button { margin: 5px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
     pre {
-      background: #f9f9f9;
+      background: #f0f0f0;
       padding: 10px;
       border-radius: 5px;
       max-height: 300px;
       overflow-y: auto;
       white-space: pre-wrap;
+    }
+    #emailContainer {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    #copyBtn {
+      padding: 5px 10px;
+      font-size: 14px;
+      cursor: pointer;
     }
   </style>
 </head>
@@ -183,7 +198,11 @@ function doGet() {
   <h2>📧 TempMail Monitor</h2>
   <button onclick="start()">▶ Start Monitoring</button>
   <button onclick="stop()">⏹ Stop Monitoring</button>
-  <p id="email">📭 Temp Email: Not started</p>
+
+  <div id="emailContainer">
+    <span id="email">📭 Temp Email: Not started</span>
+    <button id="copyBtn" onclick="copyEmail()">📋 Copy</button>
+  </div>
 
   <h3>🛠 Process Logs</h3>
   <div id="processLogs"><pre>Loading...</pre></div>
@@ -194,7 +213,10 @@ function doGet() {
   <script>
     function start() {
       document.getElementById("email").innerText = "📭 Temp Email: Starting...";
-      google.script.run.withSuccessHandler(refresh).startMonitoring();
+      google.script.run.withSuccessHandler(email => {
+        document.getElementById("email").innerText = "📭 Temp Email: " + email;
+        refresh();
+      }).startMonitoring();
     }
 
     function stop() {
@@ -203,11 +225,15 @@ function doGet() {
       }).stopMonitoring();
     }
 
-    function refresh() {
-      google.script.run.withSuccessHandler(email => {
-        document.getElementById("email").innerText = "📭 Temp Email: " + email;
-      }).getEmail();
+    function copyEmail() {
+      const text = document.getElementById("email").innerText.replace("📭 Temp Email: ", "").trim();
+      navigator.clipboard.writeText(text).then(() => {
+        document.getElementById("copyBtn").innerText = "✅ Copied";
+        setTimeout(() => document.getElementById("copyBtn").innerText = "📋 Copy", 2000);
+      });
+    }
 
+    function refresh() {
       google.script.run.withSuccessHandler(data => {
         const logs = data.map(r => `${r[0]} | ${r[1] || ''}`).join('\n');
         document.getElementById("processLogs").innerHTML = `<pre>${logs}</pre>`;
@@ -219,7 +245,7 @@ function doGet() {
       }).getLogs();
     }
 
-    setInterval(refresh, 5000); // auto-refresh every 5 seconds
+    setInterval(refresh, 5000); // refresh logs every 5 seconds
     refresh();
   </script>
 </body>
