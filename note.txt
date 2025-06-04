@@ -11,7 +11,7 @@ function startMonitoring() {
 
   // Generate temp mail account
   const domainRes = UrlFetchApp.fetch('https://api.mail.tm/domains');
-  const domain = JSON.parse(domainRes.getContentText()).hydra:member[0].domain;
+  const domain = JSON.parse(domainRes.getContentText())['hydra:member'][0].domain;
   const email = `user${Date.now()}@${domain}`;
   const password = `P@ssword${Date.now()}`;
 
@@ -75,7 +75,7 @@ function fetchInbox() {
     }
   });
 
-  const messages = JSON.parse(res.getContentText()).hydra:member;
+  const messages = JSON.parse(res.getContentText())['hydra:member'];
   const sheet = SpreadsheetApp.openById(spreadsheetId).getActiveSheet();
 
   messages.forEach(msg => {
@@ -116,14 +116,13 @@ function getLogs() {
   const values = sheet.getDataRange().getValues();
   return values;
 }
+
+/**
+ * Serve HTML frontend
+ */
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index');
 }
-
-
-
-
-
 
 
 
@@ -139,16 +138,16 @@ function doGet() {
   <head>
     <base target="_top">
     <style>
-      body { font-family: Arial; padding: 20px; }
-      button { margin: 5px; }
-      pre { background: #f5f5f5; padding: 10px; border-radius: 5px; }
+      body { font-family: Arial, sans-serif; padding: 20px; }
+      button { margin: 5px; padding: 8px 16px; }
+      pre { background: #f4f4f4; padding: 12px; border-radius: 6px; white-space: pre-wrap; }
     </style>
   </head>
   <body>
-    <h2>Mail.tm Inbox Logger</h2>
+    <h2>📬 Temp Mail Inbox Monitor</h2>
     <button onclick="start()">Start Monitoring</button>
     <button onclick="stop()">Stop Monitoring</button>
-    <h3>Logs</h3>
+    <h3>📄 Logs</h3>
     <div id="logs"><pre>Loading...</pre></div>
 
     <script>
@@ -169,8 +168,9 @@ function doGet() {
         document.getElementById("logs").innerHTML = `<pre>${formatted}</pre>`;
       }
 
+      // Refresh logs every 5 seconds
       setInterval(fetchLogs, 5000);
-      fetchLogs(); // initial load
+      fetchLogs(); // Initial load
     </script>
   </body>
 </html>
