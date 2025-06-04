@@ -3,6 +3,9 @@ const LOG_SHEET_NAME = 'Process Logs';
 
 function ensureSpreadsheet() {
   const props = PropertiesService.getScriptProperties();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(5000); // wait up to 5s for other processes
+
   let sheetId = props.getProperty('sheetId');
   let ss;
 
@@ -23,6 +26,7 @@ function ensureSpreadsheet() {
     ss = SpreadsheetApp.openById(sheetId);
   }
 
+  lock.releaseLock(); // important!
   return ss;
 }
 
@@ -152,6 +156,12 @@ function getEmail() {
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index');
 }
+
+
+
+
+
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -165,6 +175,7 @@ function doGet() {
       border-radius: 5px;
       max-height: 300px;
       overflow-y: auto;
+      white-space: pre-wrap;
     }
   </style>
 </head>
@@ -208,7 +219,7 @@ function doGet() {
       }).getLogs();
     }
 
-    setInterval(refresh, 5000);
+    setInterval(refresh, 5000); // auto-refresh every 5 seconds
     refresh();
   </script>
 </body>
