@@ -1,1 +1,182 @@
-https://script.google.com/u/0/home/projects/1zqt_6wQYyTx2Gb1NDGSWTWeIqIpeomcpJlmndpmEOH1fb7hjHVVzN2vC/edit
+function startMonitoring() {
+  const props = PropertiesService.getScriptProperties();
+
+  // Prevent duplicate start
+  if (props.getProperty('monitoring') === 'true') {
+    return "Already started.";
+  }
+
+  // Generate temp email
+  const domainRes = UrlFetchApp.fetch('https://api.mail.tm/domains');
+  const domain = JSON.parse(domainRes.getContentText())['hydra:member'][0].domain;
+  const email = `user${Date.now()}@${domain}`;
+  const password = `P@ss${Date.now()}`;
+
+  // Create account
+  UrlFetchApp.fetch('https://api.mail.tm/accounts', {
+    method: 'POST',
+    contentType: 'application/json',
+    payload: JSON.stringify({ address: email, password })
+  });
+
+  // Login to get token
+  const loginRes = UrlFetchApp.fetch('https://api.mail.tm/token', {
+    method: 'POST',
+    contentType: 'application/json',
+    payload: JSON.stringify({ address: email, password })
+  });
+
+  const loginData = JSON.parse(loginRes.getContentText());
+  const token = loginData.token;
+
+  // Create Google Sheet
+  const sheet = SpreadsheetApp.create("TempMail Inbox Logs");
+  const sheetId = sheet.getId();
+  const headers = ["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body"];
+  sheet.appendRow(headers);
+  sheet.appendRow([email, new Date(), "NULL", "STARTED", "NULL", "NULL", "NULL"]);
+
+  // Save persistent values
+  props.setProperties({
+    monitoring: 'true',
+    token,
+    email,
+    sheetId
+  });
+
+  // Create trigger to fetch inbox
+  ScriptApp.newTrigger('fetchInbox')
+    .timeBased()
+    .everyMinutes(1)
+    .create();
+
+  return `Monitoring started with email: ${email}`;
+}
+
+function stopMonitoring() {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty('monitoring', 'false');
+
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(trigger => {
+    if (trigger.getHandlerFunction() === 'fetchInbox') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  return "Monitoring stopped.";
+}
+
+function fetchInbox() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('monitoring') !== 'true') return;
+
+  const token = props.getProperty('token');
+  const email = props.getProperty('email');
+  const sheetId = props.getProperty('sheetId');
+  const sheet = SpreadsheetApp.openById(sheetId).getActiveSheet();
+
+  const response = UrlFetchApp.fetch("https://api.mail.tm/messages", {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  const messages = JSON.parse(response.getContentText())['hydra:member'];
+  const existingRows = sheet.getDataRange().getValues();
+
+  messages.forEach(msg => {
+    if (existingRows.some(row => row[1] === msg.createdAt && row[3] === msg.subject)) return;
+
+    const fullMsgRes = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    const fullMsg = JSON.parse(fullMsgRes.getContentText());
+    const otp = fullMsg.text.match(/\b\d{4,8}\b/);
+    const link = fullMsg.text.match(/https?:\/\/[^\s]+/);
+
+    sheet.appendRow([
+      email,
+      msg.createdAt,
+      msg.from.address,
+      msg.subject,
+      otp ? otp[0] : "NULL",
+      link ? link[0] : "NULL",
+      fullMsg.text
+    ]);
+  });
+}
+
+function getLogs() {
+  const props = PropertiesService.getScriptProperties();
+  const sheetId = props.getProperty('sheetId');
+  if (!sheetId) return [];
+
+  const sheet = SpreadsheetApp.openById(sheetId).getActiveSheet();
+  return sheet.getDataRange().getValues();
+}
+
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Index');
+}
+
+
+
+
+
+
+
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body { font-family: Arial, sans-serif; padding: 20px; }
+      button { margin: 5px; padding: 10px 20px; font-size: 16px; }
+      pre { background: #f4f4f4; padding: 12px; border-radius: 6px; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+    </style>
+  </head>
+  <body>
+    <h2>📬 Temp Mail Inbox Monitor</h2>
+    <button onclick="start()">▶ Start Monitoring</button>
+    <button onclick="stop()">⏹ Stop Monitoring</button>
+    <p id="status">Status: Ready</p>
+
+    <h3>📄 Logs</h3>
+    <div id="logs"><pre>Loading logs...</pre></div>
+
+    <script>
+      function start() {
+        document.getElementById("status").innerText = "Starting...";
+        google.script.run.withSuccessHandler(msg => {
+          alert(msg);
+          document.getElementById("status").innerText = msg;
+        }).startMonitoring();
+      }
+
+      function stop() {
+        document.getElementById("status").innerText = "Stopping...";
+        google.script.run.withSuccessHandler(msg => {
+          alert(msg);
+          document.getElementById("status").innerText = msg;
+        }).stopMonitoring();
+      }
+
+      function fetchLogs() {
+        google.script.run.withSuccessHandler(renderLogs).getLogs();
+      }
+
+      function renderLogs(data) {
+        if (!data || data.length === 0) {
+          document.getElementById("logs").innerHTML = "<pre>No logs yet.</pre>";
+          return;
+        }
+        const formatted = data.map(row => row.join(" | ")).join("\n");
+        document.getElementById("logs").innerHTML = `<pre>${formatted}</pre>`;
+      }
+
+      setInterval(fetchLogs, 5000);
+      fetchLogs();
+    </script>
+  </body>
+</html>
