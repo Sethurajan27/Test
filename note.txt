@@ -1,275 +1,42 @@
-const SHEET_NAME = 'TempMail Logs';
-const LOG_SHEET_NAME = 'Process Logs';
-const ID_COLUMN = 8; // H column for Message ID
+name: News Login Test
 
-function ensureSpreadsheet() {
-  const props = PropertiesService.getScriptProperties();
-  const lock = LockService.getScriptLock();
-  lock.waitLock(5000);
+on: [push, workflow_dispatch]
 
-  let sheetId = props.getProperty('sheetId');
-  let ss;
-
-  if (!sheetId) {
-    ss = SpreadsheetApp.create("TempMail Inbox Logs");
-    sheetId = ss.getId();
-    props.setProperty('sheetId', sheetId);
-
-    const inboxSheet = ss.getActiveSheet();
-    inboxSheet.setName(SHEET_NAME);
-    inboxSheet.appendRow(["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body", "MessageID"]);
-
-    const logSheet = ss.insertSheet(LOG_SHEET_NAME);
-    logSheet.appendRow(["Timestamp", "Log"]);
-
-    logProcess("✅ New spreadsheet created.");
-  } else {
-    ss = SpreadsheetApp.openById(sheetId);
-  }
-
-  lock.releaseLock();
-  return ss;
-}
-
-function clearSpreadsheetData() {
-  const ss = ensureSpreadsheet();
-  const inboxSheet = ss.getSheetByName(SHEET_NAME);
-  const logSheet = ss.getSheetByName(LOG_SHEET_NAME);
-
-  inboxSheet.clearContents();
-  inboxSheet.appendRow(["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body", "MessageID"]);
-
-  logSheet.clearContents();
-  logSheet.appendRow(["Timestamp", "Log"]);
-
-  logProcess("🧹 Spreadsheet cleared for new session.");
-}
-
-function logProcess(msg) {
-  const ss = ensureSpreadsheet();
-  const logSheet = ss.getSheetByName(LOG_SHEET_NAME);
-  logSheet.appendRow([new Date(), msg]);
-}
-
-function stopMonitoring() {
-  const props = PropertiesService.getScriptProperties();
-  props.setProperty('monitoring', 'false');
-  props.deleteProperty('token');
-  props.deleteProperty('email');
-
-  ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() === 'fetchInbox') ScriptApp.deleteTrigger(t);
-  });
-
-  clearSpreadsheetData();
-  logProcess("⏹ Monitoring stopped and spreadsheet cleared.");
-  return "Monitoring stopped.";
-}
-
-function startMonitoring() {
-  stopMonitoring(); // Stops and clears previous session
-  logProcess("▶ Starting new monitoring session");
-
-  const props = PropertiesService.getScriptProperties();
-  props.setProperty('monitoring', 'true');
-
-  const domainRes = UrlFetchApp.fetch('https://api.mail.tm/domains');
-  const domain = JSON.parse(domainRes.getContentText())['hydra:member'][0].domain;
-  const email = `user${Date.now()}@${domain}`;
-  const password = `Pass${Date.now()}`;
-
-  logProcess("🛠 Creating temp account: " + email);
-
-  UrlFetchApp.fetch('https://api.mail.tm/accounts', {
-    method: 'POST',
-    contentType: 'application/json',
-    payload: JSON.stringify({ address: email, password })
-  });
-
-  const loginRes = UrlFetchApp.fetch('https://api.mail.tm/token', {
-    method: 'POST',
-    contentType: 'application/json',
-    payload: JSON.stringify({ address: email, password })
-  });
-
-  const token = JSON.parse(loginRes.getContentText()).token;
-
-  props.setProperty('token', token);
-  props.setProperty('email', email);
-
-  const ss = ensureSpreadsheet();
-  const inboxSheet = ss.getSheetByName(SHEET_NAME);
-  inboxSheet.appendRow([email, new Date(), "NULL", "STARTED", "NULL", "NULL", "NULL", "NULL"]);
-
-  logProcess("✅ Monitoring started with temp email: " + email);
-
-  ScriptApp.newTrigger('fetchInbox')
-    .timeBased()
-    .everyMinutes(1)
-    .create();
-
-  return email;
-}
-
-function fetchInbox() {
-  const props = PropertiesService.getScriptProperties();
-  if (props.getProperty('monitoring') !== 'true') return;
-
-  const token = props.getProperty('token');
-  const email = props.getProperty('email');
-  const ss = ensureSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET_NAME);
-  const lastRow = sheet.getLastRow();
-
-  const loggedIDs = new Set(
-    sheet.getRange(2, ID_COLUMN, lastRow - 1).getValues().flat().filter(id => id)
-  );
-
-  const inboxRes = UrlFetchApp.fetch("https://api.mail.tm/messages", {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-
-  const messages = JSON.parse(inboxRes.getContentText())['hydra:member'];
-  if (!messages || messages.length === 0) return;
-
-  logProcess(`📩 Fetched ${messages.length} messages`);
-
-  const newRows = [];
-
-  messages.forEach(msg => {
-    if (loggedIDs.has(msg.id)) return;
-
-    const fullRes = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    const full = JSON.parse(fullRes.getContentText());
-
-    const otp = full.text.match(/\b\d{4,8}\b/);
-    const link = full.text.match(/https?:\/\/[^\s]+/);
-
-    newRows.push([
-      email,
-      msg.createdAt,
-      msg.from.address,
-      msg.subject,
-      otp ? otp[0] : "NULL",
-      link ? link[0] : "NULL",
-      full.text,
-      msg.id
-    ]);
-
-    logProcess("✅ Logged new message: " + msg.subject);
-  });
-
-  if (newRows.length) {
-    sheet.getRange(lastRow + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
-  } else {
-    logProcess("ℹ️ No new messages to log.");
-  }
-}
-
-function getLogs() {
-  const ss = ensureSpreadsheet();
-  return ss.getSheetByName(SHEET_NAME).getDataRange().getValues();
-}
-
-function getProcessLogs() {
-  const ss = ensureSpreadsheet();
-  return ss.getSheetByName(LOG_SHEET_NAME).getDataRange().getValues();
-}
-
-function getEmail() {
-  return PropertiesService.getScriptProperties().getProperty('email') || '';
-}
-
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Index');
-}
-
-
-
-
-<!DOCTYPE html>
-<html>
-<head>
-  <base target="_top">
-  <style>
-    body { font-family: Arial; padding: 20px; }
-    button { margin: 5px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
-    pre {
-      background: #f0f0f0;
-      padding: 10px;
-      border-radius: 5px;
-      max-height: 300px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-    }
-    #emailContainer {
-      margin-top: 10px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    #copyBtn {
-      padding: 5px 10px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-  </style>
-</head>
-<body>
-  <h2>📧 TempMail Monitor</h2>
-  <button onclick="start()">▶ Start Monitoring</button>
-  <button onclick="stop()">⏹ Stop Monitoring</button>
-
-  <div id="emailContainer">
-    <span id="email">📭 Temp Email: Not started</span>
-    <button id="copyBtn" onclick="copyEmail()">📋 Copy</button>
-  </div>
-
-  <h3>🛠 Process Logs</h3>
-  <div id="processLogs"><pre>Loading...</pre></div>
-
-  <h3>📄 Spreadsheet Logs</h3>
-  <div id="sheetLogs"><pre>Loading...</pre></div>
-
-  <script>
-    function start() {
-      document.getElementById("email").innerText = "📭 Temp Email: Starting...";
-      google.script.run.withSuccessHandler(email => {
-        document.getElementById("email").innerText = "📭 Temp Email: " + email;
-        refresh();
-      }).startMonitoring();
-    }
-
-    function stop() {
-      google.script.run.withSuccessHandler(() => {
-        document.getElementById("email").innerText = "📭 Temp Email: Monitoring stopped";
-      }).stopMonitoring();
-    }
-
-    function copyEmail() {
-      const text = document.getElementById("email").innerText.replace("📭 Temp Email: ", "").trim();
-      navigator.clipboard.writeText(text).then(() => {
-        document.getElementById("copyBtn").innerText = "✅ Copied";
-        setTimeout(() => document.getElementById("copyBtn").innerText = "📋 Copy", 2000);
-      });
-    }
-
-    function refresh() {
-      google.script.run.withSuccessHandler(data => {
-        const logs = data.map(r => `${r[0]} | ${r[1] || ''}`).join('\n');
-        document.getElementById("processLogs").innerHTML = `<pre>${logs}</pre>`;
-      }).getProcessLogs();
-
-      google.script.run.withSuccessHandler(data => {
-        const logs = data.map(r => r.join(' | ')).join('\n');
-        document.getElementById("sheetLogs").innerHTML = `<pre>${logs}</pre>`;
-      }).getLogs();
-    }
-
-    setInterval(refresh, 5000); // refresh logs every 5 seconds
-    refresh();
-  </script>
-</body>
-</html>
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser chromium-chromedriver
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Run news login test
+        env:
+          NEWS_URL: ${{ secrets.NEWS_URL }}
+          NEWS_USERNAME: ${{ secrets.NEWS_USERNAME }}
+          NEWS_PASSWORD: ${{ secrets.NEWS_PASSWORD }}
+          NEWS_USERNAME_FIELD: ${{ secrets.NEWS_USERNAME_FIELD }}
+          NEWS_PASSWORD_FIELD: ${{ secrets.NEWS_PASSWORD_FIELD }}
+          NEWS_LOGIN_BUTTON: ${{ secrets.NEWS_LOGIN_BUTTON }}
+          HEADLESS: "true"
+        run: |
+          python -m src.news_login
+      
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: news-login-screenshots
+          path: *.png
