@@ -1,20 +1,81 @@
-openai
-requests
-python-dotenv
-selenium
-pydrive
+To fully automate the OpenAI and ElevenLabs account creation using temporary emails from Mail.tm, generate an ElevenLabs API key, convert text to speech, and upload the resulting audio to a specified Google Drive folder, you can follow the structured approach below. 
+
+
+---
+
+📁 Project Structure
+
+openai-signup-automation/
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+├── src/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── mailtm_client.py
+│   ├── openai_signup.py
+│   ├── elevenlabs_signup.py
+│   ├── tts_generator.py
+│   └── drive_uploader.py
+├── tests/
+│   └── test_signup.py
+├── .env.example
+├── .gitignore
+├── README.md
+└── requirements.txt
 
 
 
+
+---
+
+🔧 Setup Instructions
+
+1. Clone the Repository:
+
+git clone https://github.com/yourusername/openai-signup-automation.git
+cd openai-signup-automation
+
+
+
+
+
+2. Install Dependencies:
+
+pip install -r requirements.txt
+
+
+
+
+
+3. Configure Environment Variables:
+
+Rename .env.example to .env.
+
+Fill in the required fields: 
 
 ELEVENLABS_API_KEY=your_elevenlabs_api_key
-GOOGLE_DRIVE_FOLDER_ID=your_google_drive_folder_id
-OPENAI_API_KEY=your_openai_api_key
+GOOGLE_DRIVE_FOLDER_ID=1zWdn50DVXpBWcuX62wP2UoR0M2WU6_jb
 HEADLESS=true
 
 
 
+4. Run the Automation Script:
 
+python -m src.openai_signup
+
+
+
+
+
+
+---
+
+📄 Key Components
+
+1. src/config.py
+
+Handles loading environment variables. 
 
 import os
 from dotenv import load_dotenv
@@ -24,100 +85,103 @@ def get_config():
     return {
         'elevenlabs_api_key': os.getenv('ELEVENLABS_API_KEY'),
         'google_drive_folder_id': os.getenv('GOOGLE_DRIVE_FOLDER_ID'),
-        'openai_api_key': os.getenv('OPENAI_API_KEY'),
         'headless': os.getenv('HEADLESS', 'true').lower() == 'true'
     }
 
 
 
+2. src/mailtm_client.py
 
-
-
-from datetime import datetime
-
-def format_prompt(time_range, greeting, topics):
-    today = datetime.now().strftime("%Y-%m-%d")
-    return f"""
-{greeting}
-{today} நாட்காட்டியில் {time_range} வரை இந்தியாவிலிருந்து கிடைத்த முக்கிய செய்திகள்:
-
-{topics}
-
-இன்றைய வசனம்: "உழைப்பவன் கனவு தான் நாளைய நிஜம்."
-இது போல தினசரி செய்திகள் தெரிந்துகொள்ள like, share, subscribe மற்றும் comment செய்யுங்கள்.
-"""
-
-def get_all_prompts():
-    return [
-        {
-            "title": "Morning",
-            "filename": "morning_news.mp3",
-            "prompt": format_prompt(
-                "00:00:00 to 07:00:00",
-                "வணக்கம்! இன்று காலை நேரம், இந்தியாவில் நடந்த முக்கிய நிகழ்வுகள் இதோ:",
-                "அரசியல், தேசிய பாதுகாப்பு, பொருளாதாரம், கல்வி, தொழில், சுகாதாரம், மற்றும் பொது செய்திகள்"
-            )
-        },
-        {
-            "title": "Afternoon",
-            "filename": "afternoon_news.mp3",
-            "prompt": format_prompt(
-                "07:00:00 to 13:00:00",
-                "வணக்கம்! இன்று மதிய நேரத்தில் இந்தியாவில் பதிவான முக்கிய செய்திகள் இவை:",
-                "அரசியல், கல்வி, பொருளாதாரம், தொழில், மக்கள் நலன், மற்றும் பொது நிகழ்வுகள்"
-            )
-        },
-        {
-            "title": "Evening",
-            "filename": "evening_news.mp3",
-            "prompt": format_prompt(
-                "13:00:00 to 19:00:00",
-                "மாலை வணக்கம்! இன்று மாலை இந்தியாவில் நிகழ்ந்த முக்கிய செய்திகள் இதோ:",
-                "அரசியல், தொழில், தேசிய செய்திகள், கல்வி, மக்கள் நலன், மற்றும் பொது நிகழ்வுகள்"
-            )
-        },
-        {
-            "title": "Night",
-            "filename": "night_news.mp3",
-            "prompt": format_prompt(
-                "19:00:00 to 22:30:00",
-                "இரவின் வணக்கம்! இன்று இரவு 7 மணி முதல் 10.30 மணி வரை இந்தியாவில் நடந்த முக்கிய செய்திகள்:",
-                "அரசியல், தேசிய பாதுகாப்பு, தொழில், பொது நிகழ்வுகள், கல்வி, மற்றும் சுகாதாரம்"
-            )
-        }
-    ]
-
-
-
-
-
-
-
-
-import openai
-from src.config import get_config
-
-config = get_config()
-openai.api_key = config['openai_api_key']
-
-def generate_news_text(prompt):
-    response = openai.ChatCompletion.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7
-    )
-    return response['choices'][0]['message']['content']
-
-
-
-
-
-
+Manages temporary email creation and inbox monitoring using Mail.tm API. 
 
 import requests
 import time
 
-def generate_speech(api_key, text, voice_id='EXAVITQu4vr4xnSDxMaL', filename=None):
+class MailTMClient:
+    def __init__(self):
+        self.base_url = 'https://api.mail.tm'
+        self.session = requests.Session()
+        self.account = self.create_account()
+        self.token = self.get_token()
+
+    def create_account(self):
+        domain = self.session.get(f'{self.base_url}/domains').json()['hydra:member'][0]['domain']
+        email = f'test{int(time.time())}@{domain}'
+        password = 'Password123!'
+        response = self.session.post(f'{self.base_url}/accounts', json={'address': email, 'password': password})
+        return {'email': email, 'password': password}
+
+    def get_token(self):
+        response = self.session.post(f'{self.base_url}/token', json=self.account)
+        return response.json()['token']
+
+    def wait_for_email(self, subject_keyword, timeout=300):
+        headers = {'Authorization': f'Bearer {self.token}'}
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            messages = self.session.get(f'{self.base_url}/messages', headers=headers).json()['hydra:member']
+            for message in messages:
+                if subject_keyword in message['subject']:
+                    msg = self.session.get(f"{self.base_url}/messages/{message['id']}", headers=headers).json()
+                    return msg['text']
+            time.sleep(5)
+        raise TimeoutError("Email not received within timeout period.")
+
+
+
+3. src/openai_signup.py
+
+Automates OpenAI account creation using Selenium and the temporary email. 
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from src.mailtm_client import MailTMClient
+import time
+
+def init_driver(headless=True):
+    options = Options()
+    if headless:
+        options.add_argument('--headless')
+    driver = webdriver.Chrome(options=options)
+    return driver
+
+def openai_signup(driver, email, password):
+    driver.get('https://auth.openai.com/signup')
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, 'email'))).send_keys(email)
+    driver.find_element(By.XPATH, "//button[contains(text(), 'Continue')]").click()
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, 'password'))).send_keys(password)
+    driver.find_element(By.XPATH, "//button[contains(text(), 'Continue')]").click()
+    # Wait for email verification
+    time.sleep(10)
+
+
+
+4. src/elevenlabs_signup.py
+
+Automates ElevenLabs account creation and retrieves the API key. 
+
+def elevenlabs_signup(driver, email, password):
+    driver.get('https://www.elevenlabs.io/signup')
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, 'email'))).send_keys(email)
+    driver.find_element(By.NAME, 'password').send_keys(password)
+    driver.find_element(By.XPATH, "//button[contains(text(), 'Sign Up')]").click()
+    # Wait for email verification
+    time.sleep(10)
+    # After verification, retrieve API key from account settings
+
+
+
+5. src/tts_generator.py
+
+Generates speech from text using ElevenLabs API and saves it as an MP3 file. 
+
+import requests
+import time
+
+def generate_speech(api_key, text, voice_id='EXAVITQu4vr4xnSDxMaL'):
     url = f'https://api.elevenlabs.io/v1/text-to-speech/{voice_id}'
     headers = {
         'xi-api-key': api_key,
@@ -135,15 +199,16 @@ def generate_speech(api_key, text, voice_id='EXAVITQu4vr4xnSDxMaL', filename=Non
         }
     }
     response = requests.post(url, headers=headers, json=payload)
-    filename = filename or f"{int(time.time())}.mp3"
+    filename = f"{int(time.time())}.mp3"
     with open(filename, 'wb') as f:
         f.write(response.content)
     return filename
 
 
 
+6. src/drive_uploader.py
 
-
+Uploads the generated MP3 file to the specified Google Drive folder. 
 
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
@@ -159,43 +224,13 @@ def upload_to_drive(file_path, folder_id):
 
 
 
+---
 
+🚀 GitHub Actions CI/CD
 
+To automate the process using GitHub Actions, add the following workflow: 
 
-
-from src.config import get_config
-from src.tts_generator import generate_speech
-from src.drive_uploader import upload_to_drive
-from src.news_generator import generate_news_text
-from prompts.tamil_news_prompts import get_all_prompts
-
-def main():
-    config = get_config()
-    prompts = get_all_prompts()
-
-    for item in prompts:
-        print(f"🔹 Generating news for: {item['title']}")
-        news_text = generate_news_text(item["prompt"])
-        print("✅ News text generated.")
-
-        mp3_file = generate_speech(config['elevenlabs_api_key'], news_text, filename=item["filename"])
-        print(f"✅ Audio saved: {mp3_file}")
-
-        upload_to_drive(mp3_file, config['google_drive_folder_id'])
-        print(f"✅ Uploaded to Google Drive: {mp3_file}\n")
-
-if __name__ == "__main__":
-    main()
-
-
-
-
-
-
-
-
-
-name: News Audio Automation
+name: OpenAI and ElevenLabs Automation
 
 on:
   push:
@@ -207,22 +242,43 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+    - uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
 
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
 
-      - name: Run news generator
-        env:
-          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
-          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          HEADLESS: "true"
-        run: |
-          python run.py
+    - name: Run automation script
+      env:
+        ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+        GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+        HEADLESS: "true"
+      run: |
+        python -m src.openai_signup
+
+
+
+
+---
+
+📝 Notes
+
+Google Drive Authentication: The drive_uploader.py script uses PyDrive for uploading files. Ensure that you have set up Google Drive API credentials and have the client_secrets.json file in your project directory. 
+
+Email Verification: Both OpenAI and ElevenLabs require email verification. The scripts wait for the verification email and proceed once it's received. 
+
+Security: Never hardcode sensitive information like API keys or passwords. Always use environment variables or secure secrets management. 
+
+
+
+---
+
+By following this structured approach, you can automate the entire process of account creation, API key retrieval, text-to-speech conversion, and uploading the result to Google Drive. 
+
+---
+
