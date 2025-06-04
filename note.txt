@@ -1,25 +1,18 @@
 function startMonitoring() {
   const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('monitoring') === 'true') return "ok";  // Already started silently
 
-  // Prevent duplicate start
-  if (props.getProperty('monitoring') === 'true') {
-    return "Already started.";
-  }
-
-  // Generate temp email
   const domainRes = UrlFetchApp.fetch('https://api.mail.tm/domains');
   const domain = JSON.parse(domainRes.getContentText())['hydra:member'][0].domain;
   const email = `user${Date.now()}@${domain}`;
   const password = `P@ss${Date.now()}`;
 
-  // Create account
   UrlFetchApp.fetch('https://api.mail.tm/accounts', {
     method: 'POST',
     contentType: 'application/json',
     payload: JSON.stringify({ address: email, password })
   });
 
-  // Login to get token
   const loginRes = UrlFetchApp.fetch('https://api.mail.tm/token', {
     method: 'POST',
     contentType: 'application/json',
@@ -29,14 +22,12 @@ function startMonitoring() {
   const loginData = JSON.parse(loginRes.getContentText());
   const token = loginData.token;
 
-  // Create Google Sheet
   const sheet = SpreadsheetApp.create("TempMail Inbox Logs");
   const sheetId = sheet.getId();
   const headers = ["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body"];
   sheet.appendRow(headers);
   sheet.appendRow([email, new Date(), "NULL", "STARTED", "NULL", "NULL", "NULL"]);
 
-  // Save persistent values
   props.setProperties({
     monitoring: 'true',
     token,
@@ -44,27 +35,25 @@ function startMonitoring() {
     sheetId
   });
 
-  // Create trigger to fetch inbox
   ScriptApp.newTrigger('fetchInbox')
     .timeBased()
     .everyMinutes(1)
     .create();
 
-  return `Monitoring started with email: ${email}`;
+  return "ok";
 }
 
 function stopMonitoring() {
   const props = PropertiesService.getScriptProperties();
   props.setProperty('monitoring', 'false');
 
-  const triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(trigger => {
+  ScriptApp.getProjectTriggers().forEach(trigger => {
     if (trigger.getHandlerFunction() === 'fetchInbox') {
       ScriptApp.deleteTrigger(trigger);
     }
   });
 
-  return "Monitoring stopped.";
+  return "ok";
 }
 
 function fetchInbox() {
@@ -115,11 +104,13 @@ function getLogs() {
   return sheet.getDataRange().getValues();
 }
 
+function getEmail() {
+  return PropertiesService.getScriptProperties().getProperty('email') || '';
+}
+
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index');
 }
-
-
 
 
 
@@ -140,26 +131,28 @@ function doGet() {
     <h2>📬 Temp Mail Inbox Monitor</h2>
     <button onclick="start()">▶ Start Monitoring</button>
     <button onclick="stop()">⏹ Stop Monitoring</button>
-    <p id="status">Status: Ready</p>
+    <p id="email">📧 Temp Email: <em>not started</em></p>
 
     <h3>📄 Logs</h3>
     <div id="logs"><pre>Loading logs...</pre></div>
 
     <script>
       function start() {
-        document.getElementById("status").innerText = "Starting...";
-        google.script.run.withSuccessHandler(msg => {
-          alert(msg);
-          document.getElementById("status").innerText = msg;
+        google.script.run.withSuccessHandler(() => {
+          getEmail();
         }).startMonitoring();
       }
 
       function stop() {
-        document.getElementById("status").innerText = "Stopping...";
-        google.script.run.withSuccessHandler(msg => {
-          alert(msg);
-          document.getElementById("status").innerText = msg;
+        google.script.run.withSuccessHandler(() => {
+          document.getElementById("email").innerText = "📧 Temp Email: monitoring stopped";
         }).stopMonitoring();
+      }
+
+      function getEmail() {
+        google.script.run.withSuccessHandler(email => {
+          document.getElementById("email").innerText = "📧 Temp Email: " + email;
+        }).getEmail();
       }
 
       function fetchLogs() {
@@ -177,6 +170,7 @@ function doGet() {
 
       setInterval(fetchLogs, 5000);
       fetchLogs();
+      getEmail();
     </script>
   </body>
 </html>
