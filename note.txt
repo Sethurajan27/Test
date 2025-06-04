@@ -1,75 +1,48 @@
-# News site credentials (rename to .env)
-NEWS_URL=https://example.news/login
-NEWS_USERNAME=your@email.com
-NEWS_PASSWORD=your_password_123
-NEWS_USERNAME_FIELD=email_field
-NEWS_PASSWORD_FIELD=pass_field
-NEWS_LOGIN_BUTTON=login_btn
-HEADLESS=true
+import pytest
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+from src.news_login import news_login, init_driver
 
+@pytest.fixture(scope="module")
+def driver():
+    """Fixture to initialize and quit WebDriver"""
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    driver = webdriver.Chrome(
+        ChromeDriverManager().install(),
+        options=chrome_options
+    )
+    yield driver
+    driver.quit()
 
-selenium==4.9.1
-webdriver-manager==3.8.6
-python-dotenv==1.0.0
-pytest==7.4.0
+def test_successful_login(driver):
+    """Test successful login with valid credentials"""
+    test_config = {
+        'url': 'https://demo.realworld.io/#/login',
+        'username': 'testuser@example.com',
+        'password': 'password123',
+        'username_field': 'input[type="email"]',
+        'password_field': 'input[type="password"]',
+        'login_button': 'button[type="submit"]',
+        'headless': True
+    }
+    
+    assert news_login(driver, test_config) is True
+    assert "feed" in driver.current_url  # Verify redirect after login
 
-
-
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-
-# Environment
-.env
-*.env
-
-# Screenshots
-screenshots/
-
-# IDE
-.vscode/
-.idea/
-
-
-
-
-
-
-
-# 📰 News Site Login Automation
-
-Automates login for news websites using Selenium WebDriver.
-
-## 🛠 Setup
-1. Clone repository:
-   ```bash
-   git clone https://github.com/yourusername/news.git
-   cd news
-   ```
-
-2. Configure environment:
-   ```bash
-   cp .env.example .env
-   nano .env  # Add your actual credentials
-   ```
-
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-## 🚀 Usage
-```bash
-python -m src.news_login
-```
-
-## 📸 Screenshots
-- Success: `screenshots/login_success.png`
-- Failure: `screenshots/login_failed.png`
-
-## ⚙️ GitHub Actions
-Automatically runs on push:
-1. Installs Chrome
-2. Runs login test
-3. Uploads screenshots as artifacts
+def test_failed_login(driver):
+    """Test failed login with invalid credentials"""
+    test_config = {
+        'url': 'https://demo.realworld.io/#/login',
+        'username': 'wrong@user.com',
+        'password': 'invalidpass',
+        'username_field': 'input[type="email"]',
+        'password_field': 'input[type="password"]',
+        'login_button': 'button[type="submit"]',
+        'headless': True
+    }
+    
+    assert news_login(driver, test_config) is False
+    assert "login" in driver.current_url  # Still on login page
