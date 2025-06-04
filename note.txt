@@ -1,30 +1,54 @@
-var logs = [];
+const SHEET_NAME = 'TempMail Logs';
+const LOG_SHEET_NAME = 'Process Logs';
 
-function logEvent(message) {
-  const time = new Date().toLocaleTimeString();
-  logs.push(`[${time}] ${message}`);
-  if (logs.length > 1000) logs.shift();
+function ensureSpreadsheet() {
+  const props = PropertiesService.getScriptProperties();
+  let sheetId = props.getProperty('sheetId');
+  let ss;
+
+  if (!sheetId) {
+    ss = SpreadsheetApp.create("TempMail Inbox Logs");
+    props.setProperty('sheetId', ss.getId());
+
+    const inboxSheet = ss.getActiveSheet();
+    inboxSheet.setName(SHEET_NAME);
+    inboxSheet.appendRow(["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body"]);
+
+    const logSheet = ss.insertSheet(LOG_SHEET_NAME);
+    logSheet.appendRow(["Timestamp", "Log"]);
+
+  } else {
+    ss = SpreadsheetApp.openById(sheetId);
+  }
+
+  return ss;
+}
+
+function logProcess(msg) {
+  const ss = ensureSpreadsheet();
+  const logSheet = ss.getSheetByName(LOG_SHEET_NAME);
+  logSheet.appendRow([new Date(), msg]);
 }
 
 function startMonitoring() {
-  logEvent("Start monitoring called.");
+  logProcess("START: Monitoring initiated");
 
   const props = PropertiesService.getScriptProperties();
   props.setProperty('monitoring', 'true');
 
   const domainRes = UrlFetchApp.fetch('https://api.mail.tm/domains');
   const domain = JSON.parse(domainRes.getContentText())['hydra:member'][0].domain;
-
   const email = `user${Date.now()}@${domain}`;
   const password = `P@ss${Date.now()}`;
 
-  logEvent("Creating temp email: " + email);
+  logProcess("Generated email: " + email);
 
   UrlFetchApp.fetch('https://api.mail.tm/accounts', {
     method: 'POST',
     contentType: 'application/json',
     payload: JSON.stringify({ address: email, password })
   });
+  logProcess("Created temp mail account");
 
   const loginRes = UrlFetchApp.fetch('https://api.mail.tm/token', {
     method: 'POST',
@@ -32,75 +56,75 @@ function startMonitoring() {
     payload: JSON.stringify({ address: email, password })
   });
 
-  const token = JSON.parse(loginRes.getContentText()).token;
+  const loginData = JSON.parse(loginRes.getContentText());
+  const token = loginData.token;
 
-  logEvent("Temp mail created and token received.");
+  logProcess("Obtained token");
 
-  // Use same spreadsheet
-  let sheetId = props.getProperty('sheetId');
-  let sheet;
-  if (sheetId) {
-    sheet = SpreadsheetApp.openById(sheetId).getActiveSheet();
-    logEvent("Using existing spreadsheet.");
-  } else {
-    const newSheet = SpreadsheetApp.create("TempMail Logs");
-    sheetId = newSheet.getId();
-    sheet = newSheet.getActiveSheet();
-    sheet.appendRow(["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body"]);
-    props.setProperty('sheetId', sheetId);
-    logEvent("Created new spreadsheet.");
-  }
+  props.setProperty('token', token);
+  props.setProperty('email', email);
 
-  sheet.appendRow([email, new Date(), "NULL", "STARTED", "NULL", "NULL", "NULL"]);
-  logEvent("Logged STARTED row.");
+  const ss = ensureSpreadsheet();
+  const inboxSheet = ss.getSheetByName(SHEET_NAME);
+  inboxSheet.appendRow([email, new Date(), "NULL", "STARTED", "NULL", "NULL", "NULL"]);
+  logProcess("Logged STARTED row to inbox");
 
-  props.setProperties({
-    token,
-    email,
-    sheetId
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'fetchInbox') ScriptApp.deleteTrigger(t);
   });
+
+  ScriptApp.newTrigger('fetchInbox')
+    .timeBased()
+    .everyMinutes(1)
+    .create();
+
+  logProcess("Created polling trigger");
 
   return "ok";
 }
 
 function stopMonitoring() {
-  logEvent("Stop monitoring called.");
-  PropertiesService.getScriptProperties().setProperty('monitoring', 'false');
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty('monitoring', 'false');
+
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === 'fetchInbox') ScriptApp.deleteTrigger(t);
+  });
+
+  logProcess("Monitoring stopped");
   return "ok";
 }
 
 function fetchInbox() {
-  logEvent("Inbox fetch triggered.");
   const props = PropertiesService.getScriptProperties();
-  if (props.getProperty('monitoring') !== 'true') {
-    logEvent("Monitoring not active.");
-    return;
-  }
+  if (props.getProperty('monitoring') !== 'true') return;
 
   const token = props.getProperty('token');
   const email = props.getProperty('email');
-  const sheetId = props.getProperty('sheetId');
-  const sheet = SpreadsheetApp.openById(sheetId).getActiveSheet();
+  const ss = ensureSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  const existing = sheet.getDataRange().getValues();
+  const existingKeys = new Set(existing.map(r => r[1] + r[3]));
 
   const response = UrlFetchApp.fetch("https://api.mail.tm/messages", {
     headers: { Authorization: `Bearer ${token}` }
   });
 
   const messages = JSON.parse(response.getContentText())['hydra:member'];
-  const existing = sheet.getDataRange().getValues().map(row => row[1] + row[3]);
+  logProcess("Inbox polled: " + messages.length + " messages");
 
   messages.forEach(msg => {
-    const key = msg.createdAt + msg.subject;
-    if (existing.includes(key)) return;
+    if (existingKeys.has(msg.createdAt + msg.subject)) return;
 
-    const fullMsg = JSON.parse(UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
+    const fullMsgRes = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
       headers: { Authorization: `Bearer ${token}` }
-    }).getContentText());
+    });
 
+    const fullMsg = JSON.parse(fullMsgRes.getContentText());
     const otp = fullMsg.text.match(/\b\d{4,8}\b/);
     const link = fullMsg.text.match(/https?:\/\/[^\s]+/);
 
-    const row = [
+    sheet.appendRow([
       email,
       msg.createdAt,
       msg.from.address,
@@ -108,29 +132,20 @@ function fetchInbox() {
       otp ? otp[0] : "NULL",
       link ? link[0] : "NULL",
       fullMsg.text
-    ];
+    ]);
 
-    sheet.appendRow(row);
-    logEvent(`Message logged: From ${msg.from.address} | Subject: ${msg.subject}`);
+    logProcess("New message logged: " + msg.subject);
   });
 }
 
 function getLogs() {
-  return logs;
+  const ss = ensureSpreadsheet();
+  return ss.getSheetByName(SHEET_NAME).getDataRange().getValues();
 }
 
-function getSheetData() {
-  const props = PropertiesService.getScriptProperties();
-  const sheetId = props.getProperty('sheetId');
-  if (!sheetId) return [];
-
-  try {
-    const sheet = SpreadsheetApp.openById(sheetId).getActiveSheet();
-    return sheet.getDataRange().getValues();
-  } catch (e) {
-    logEvent("Error accessing spreadsheet: " + e.message);
-    return [];
-  }
+function getProcessLogs() {
+  const ss = ensureSpreadsheet();
+  return ss.getSheetByName(LOG_SHEET_NAME).getDataRange().getValues();
 }
 
 function getEmail() {
@@ -143,79 +158,67 @@ function doGet() {
 
 
 
-
-
-
-
 <!DOCTYPE html>
 <html>
   <head>
     <base target="_top">
     <style>
-      body { font-family: Arial; padding: 20px; }
-      button { padding: 10px 20px; margin: 5px; font-size: 16px; }
-      pre {
-        background: #f4f4f4;
-        padding: 10px;
-        border-radius: 5px;
-        white-space: pre-wrap;
-        max-height: 300px;
-        overflow-y: auto;
-      }
+      body { font-family: Arial, sans-serif; padding: 20px; }
+      button { margin: 5px; padding: 10px 20px; font-size: 16px; }
+      .section { margin-bottom: 20px; }
+      pre { background: #f4f4f4; padding: 12px; border-radius: 6px; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
     </style>
   </head>
   <body>
     <h2>📬 Temp Mail Monitor</h2>
-    <button onclick="start()">▶ Start Monitoring</button>
-    <button onclick="stop()">⏹ Stop Monitoring</button>
-    <p id="email">📧 Email: <em>not started</em></p>
+    <div class="section">
+      <button onclick="start()">▶ Start Monitoring</button>
+      <button onclick="stop()">⏹ Stop Monitoring</button>
+      <p id="email">📧 Temp Email: <em>Not started</em></p>
+    </div>
 
-    <h3>🔧 Process Log</h3>
-    <div id="process"><pre>Waiting for logs...</pre></div>
+    <div class="section">
+      <h3>🧠 Process Log</h3>
+      <div id="processLogs"><pre>Loading process logs...</pre></div>
+    </div>
 
-    <h3>📄 Spreadsheet Log</h3>
-    <div id="sheet"><pre>Waiting for spreadsheet data...</pre></div>
+    <div class="section">
+      <h3>📄 Inbox Log (Spreadsheet)</h3>
+      <div id="sheetLogs"><pre>Loading sheet logs...</pre></div>
+    </div>
 
     <script>
       function start() {
+        document.getElementById("email").innerText = "📧 Temp Email: starting...";
         google.script.run.withSuccessHandler(() => {
-          getEmail();
+          refresh();
         }).startMonitoring();
       }
 
       function stop() {
-        google.script.run.stopMonitoring();
-        document.getElementById("email").innerText = "📧 Email: monitoring stopped";
+        google.script.run.withSuccessHandler(() => {
+          document.getElementById("email").innerText = "📧 Temp Email: stopped";
+        }).stopMonitoring();
       }
 
-      function getEmail() {
+      function refresh() {
         google.script.run.withSuccessHandler(email => {
-          document.getElementById("email").innerText = "📧 Email: " + email;
+          document.getElementById("email").innerText = "📧 Temp Email: " + email;
         }).getEmail();
+
+        google.script.run.withSuccessHandler(logs => {
+          const out = logs.map(r => `${r[0]} | ${r[1] || ''}`).join('\n');
+          document.getElementById("processLogs").innerHTML = `<pre>${out}</pre>`;
+        }).getProcessLogs();
+
+        google.script.run.withSuccessHandler(data => {
+          const out = data.map(r => r.join(" | ")).join('\n');
+          document.getElementById("sheetLogs").innerHTML = `<pre>${out}</pre>`;
+        }).getLogs();
       }
 
-      function updateLogs() {
-        google.script.run.withSuccessHandler(renderProcessLog).getLogs();
-        google.script.run.withSuccessHandler(renderSheetLog).getSheetData();
-        google.script.run.fetchInbox(); // fetch inbox in background
-      }
-
-      function renderProcessLog(logs) {
-        document.getElementById("process").innerHTML = "<pre>" + logs.join("\n") + "</pre>";
-      }
-
-      function renderSheetLog(data) {
-        if (!data || data.length === 0) {
-          document.getElementById("sheet").innerHTML = "<pre>No spreadsheet data</pre>";
-          return;
-        }
-        const lines = data.map(row => row.join(" | "));
-        document.getElementById("sheet").innerHTML = "<pre>" + lines.join("\n") + "</pre>";
-      }
-
-      getEmail();
-      updateLogs();
-      setInterval(updateLogs, 15000); // every 15s
+      setInterval(refresh, 5000);
+      refresh();
     </script>
   </body>
 </html>
