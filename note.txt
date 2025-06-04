@@ -1,1 +1,176 @@
-<input class="flex w-full border border-gray-alpha-200 bg-transparent px-3 py-1 shadow-none transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-subtle focus-ring focus-visible:border-foreground focus-visible:ring-[0.5px] focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 autofill:shadow-[inset_0_0_0px_1000px_rgb(255,255,255)] rounded-lg h-10 text-base md:text-sm" data-testid="sign-up-email-input" autocomplete="email" placeholder="Enter your email address" required="" type="email" value="" name="email">
+let polling = false;
+let token = '';
+let account = {};
+let spreadsheetId = '';
+
+/**
+ * Called once to initialize spreadsheet and email account
+ */
+function startMonitoring() {
+  if (polling) return ContentService.createTextOutput("Already started");
+
+  // Generate temp mail account
+  const domainRes = UrlFetchApp.fetch('https://api.mail.tm/domains');
+  const domain = JSON.parse(domainRes.getContentText()).hydra:member[0].domain;
+  const email = `user${Date.now()}@${domain}`;
+  const password = `P@ssword${Date.now()}`;
+
+  // Create account
+  UrlFetchApp.fetch('https://api.mail.tm/accounts', {
+    method: 'POST',
+    contentType: 'application/json',
+    payload: JSON.stringify({ address: email, password })
+  });
+
+  // Login
+  const loginRes = UrlFetchApp.fetch('https://api.mail.tm/token', {
+    method: 'POST',
+    contentType: 'application/json',
+    payload: JSON.stringify({ address: email, password })
+  });
+  const loginData = JSON.parse(loginRes.getContentText());
+  token = loginData.token;
+
+  // Store email info
+  account = { email, password };
+
+  // Create spreadsheet
+  const sheet = SpreadsheetApp.create("TempMail Inbox");
+  spreadsheetId = sheet.getId();
+  const header = ["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body"];
+  sheet.getActiveSheet().appendRow(header);
+
+  // Insert STARTED log
+  sheet.getActiveSheet().appendRow([email, new Date(), "NULL", "STARTED", "NULL", "NULL", "NULL"]);
+
+  // Start polling
+  polling = true;
+  ScriptApp.newTrigger("fetchInbox")
+           .timeBased()
+           .everyMinutes(1)
+           .create();
+
+  return ContentService.createTextOutput(`Started monitoring with email: ${email}`);
+}
+
+/**
+ * Stop monitoring and delete triggers
+ */
+function stopMonitoring() {
+  polling = false;
+  const allTriggers = ScriptApp.getProjectTriggers();
+  allTriggers.forEach(trigger => ScriptApp.deleteTrigger(trigger));
+  return ContentService.createTextOutput("Stopped monitoring");
+}
+
+/**
+ * Polls inbox and logs to sheet
+ */
+function fetchInbox() {
+  if (!polling || !token) return;
+
+  const res = UrlFetchApp.fetch("https://api.mail.tm/messages", {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  const messages = JSON.parse(res.getContentText()).hydra:member;
+  const sheet = SpreadsheetApp.openById(spreadsheetId).getActiveSheet();
+
+  messages.forEach(msg => {
+    // Skip if already logged
+    const rows = sheet.getDataRange().getValues();
+    if (rows.find(row => row[1] === msg.intro && row[3] === msg.subject)) return;
+
+    // Get full message
+    const msgRes = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+    const fullMsg = JSON.parse(msgRes.getContentText());
+
+    // Extract OTP and Verification Link
+    const otpMatch = fullMsg.text.match(/\b\d{4,8}\b/);
+    const linkMatch = fullMsg.text.match(/https?:\/\/[^\s]+/g);
+
+    const row = [
+      account.email,
+      msg.createdAt,
+      msg.from.address,
+      msg.subject,
+      otpMatch ? otpMatch[0] : 'NULL',
+      linkMatch ? linkMatch[0] : 'NULL',
+      fullMsg.text
+    ];
+    sheet.appendRow(row);
+  });
+}
+
+/**
+ * Returns all logs to HTML frontend
+ */
+function getLogs() {
+  const sheet = SpreadsheetApp.openById(spreadsheetId).getActiveSheet();
+  const values = sheet.getDataRange().getValues();
+  return values;
+}
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Index');
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body { font-family: Arial; padding: 20px; }
+      button { margin: 5px; }
+      pre { background: #f5f5f5; padding: 10px; border-radius: 5px; }
+    </style>
+  </head>
+  <body>
+    <h2>Mail.tm Inbox Logger</h2>
+    <button onclick="start()">Start Monitoring</button>
+    <button onclick="stop()">Stop Monitoring</button>
+    <h3>Logs</h3>
+    <div id="logs"><pre>Loading...</pre></div>
+
+    <script>
+      function start() {
+        google.script.run.withSuccessHandler(alert).startMonitoring();
+      }
+
+      function stop() {
+        google.script.run.withSuccessHandler(alert).stopMonitoring();
+      }
+
+      function fetchLogs() {
+        google.script.run.withSuccessHandler(renderLogs).getLogs();
+      }
+
+      function renderLogs(data) {
+        const formatted = data.map(row => row.join(" | ")).join("\n");
+        document.getElementById("logs").innerHTML = `<pre>${formatted}</pre>`;
+      }
+
+      setInterval(fetchLogs, 5000);
+      fetchLogs(); // initial load
+    </script>
+  </body>
+</html>
