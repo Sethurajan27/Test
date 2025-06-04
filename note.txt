@@ -1,18 +1,24 @@
 var logs = [];
 
+function logEvent(message) {
+  const time = new Date().toLocaleTimeString();
+  logs.push(`[${time}] ${message}`);
+  if (logs.length > 1000) logs.shift();
+}
+
 function startMonitoring() {
+  logEvent("Start monitoring called.");
+
   const props = PropertiesService.getScriptProperties();
-  props.setProperty('monitoring', 'true'); // Always allow new session
+  props.setProperty('monitoring', 'true');
 
-  logEvent("Initializing new monitoring session...");
-
-  // 1. Generate new temp mail
   const domainRes = UrlFetchApp.fetch('https://api.mail.tm/domains');
   const domain = JSON.parse(domainRes.getContentText())['hydra:member'][0].domain;
+
   const email = `user${Date.now()}@${domain}`;
   const password = `P@ss${Date.now()}`;
 
-  logEvent("Creating temporary mail: " + email);
+  logEvent("Creating temp email: " + email);
 
   UrlFetchApp.fetch('https://api.mail.tm/accounts', {
     method: 'POST',
@@ -30,16 +36,25 @@ function startMonitoring() {
 
   logEvent("Temp mail created and token received.");
 
-  // 2. Create new spreadsheet
-  const sheet = SpreadsheetApp.create("TempMail Logs " + new Date().toISOString());
-  const sheetId = sheet.getId();
-  sheet.appendRow(["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body"]);
-  sheet.appendRow([email, new Date(), "NULL", "STARTED", "NULL", "NULL", "NULL"]);
+  // Use same spreadsheet
+  let sheetId = props.getProperty('sheetId');
+  let sheet;
+  if (sheetId) {
+    sheet = SpreadsheetApp.openById(sheetId).getActiveSheet();
+    logEvent("Using existing spreadsheet.");
+  } else {
+    const newSheet = SpreadsheetApp.create("TempMail Logs");
+    sheetId = newSheet.getId();
+    sheet = newSheet.getActiveSheet();
+    sheet.appendRow(["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body"]);
+    props.setProperty('sheetId', sheetId);
+    logEvent("Created new spreadsheet.");
+  }
 
-  logEvent("Logged STARTED row in spreadsheet.");
+  sheet.appendRow([email, new Date(), "NULL", "STARTED", "NULL", "NULL", "NULL"]);
+  logEvent("Logged STARTED row.");
 
   props.setProperties({
-    monitoring: 'true',
     token,
     email,
     sheetId
@@ -49,22 +64,23 @@ function startMonitoring() {
 }
 
 function stopMonitoring() {
-  const props = PropertiesService.getScriptProperties();
-  props.setProperty('monitoring', 'false');
-  logEvent("Monitoring stopped.");
+  logEvent("Stop monitoring called.");
+  PropertiesService.getScriptProperties().setProperty('monitoring', 'false');
   return "ok";
 }
 
 function fetchInbox() {
+  logEvent("Inbox fetch triggered.");
   const props = PropertiesService.getScriptProperties();
-  if (props.getProperty('monitoring') !== 'true') return;
+  if (props.getProperty('monitoring') !== 'true') {
+    logEvent("Monitoring not active.");
+    return;
+  }
 
   const token = props.getProperty('token');
   const email = props.getProperty('email');
   const sheetId = props.getProperty('sheetId');
   const sheet = SpreadsheetApp.openById(sheetId).getActiveSheet();
-
-  logEvent("Fetching inbox...");
 
   const response = UrlFetchApp.fetch("https://api.mail.tm/messages", {
     headers: { Authorization: `Bearer ${token}` }
@@ -95,7 +111,7 @@ function fetchInbox() {
     ];
 
     sheet.appendRow(row);
-    logEvent("New message from: " + msg.from.address + " | Subject: " + msg.subject);
+    logEvent(`Message logged: From ${msg.from.address} | Subject: ${msg.subject}`);
   });
 }
 
@@ -108,18 +124,17 @@ function getSheetData() {
   const sheetId = props.getProperty('sheetId');
   if (!sheetId) return [];
 
-  const sheet = SpreadsheetApp.openById(sheetId).getActiveSheet();
-  return sheet.getDataRange().getValues();
+  try {
+    const sheet = SpreadsheetApp.openById(sheetId).getActiveSheet();
+    return sheet.getDataRange().getValues();
+  } catch (e) {
+    logEvent("Error accessing spreadsheet: " + e.message);
+    return [];
+  }
 }
 
 function getEmail() {
   return PropertiesService.getScriptProperties().getProperty('email') || '';
-}
-
-function logEvent(message) {
-  const time = new Date().toLocaleTimeString();
-  logs.push(`[${time}] ${message}`);
-  if (logs.length > 1000) logs.shift(); // limit
 }
 
 function doGet() {
@@ -138,12 +153,11 @@ function doGet() {
     <base target="_top">
     <style>
       body { font-family: Arial; padding: 20px; }
-      button { margin: 5px; padding: 10px 20px; font-size: 16px; }
-      .section { margin-top: 20px; }
+      button { padding: 10px 20px; margin: 5px; font-size: 16px; }
       pre {
         background: #f4f4f4;
         padding: 10px;
-        border-radius: 6px;
+        border-radius: 5px;
         white-space: pre-wrap;
         max-height: 300px;
         overflow-y: auto;
@@ -154,17 +168,13 @@ function doGet() {
     <h2>📬 Temp Mail Monitor</h2>
     <button onclick="start()">▶ Start Monitoring</button>
     <button onclick="stop()">⏹ Stop Monitoring</button>
-    <p id="email">📧 Email: <em>none</em></p>
+    <p id="email">📧 Email: <em>not started</em></p>
 
-    <div class="section">
-      <h3>🔧 Process Log</h3>
-      <div id="process"><pre>Waiting...</pre></div>
-    </div>
+    <h3>🔧 Process Log</h3>
+    <div id="process"><pre>Waiting for logs...</pre></div>
 
-    <div class="section">
-      <h3>📄 Spreadsheet Log</h3>
-      <div id="sheet"><pre>Waiting...</pre></div>
-    </div>
+    <h3>📄 Spreadsheet Log</h3>
+    <div id="sheet"><pre>Waiting for spreadsheet data...</pre></div>
 
     <script>
       function start() {
@@ -174,9 +184,8 @@ function doGet() {
       }
 
       function stop() {
-        google.script.run.withSuccessHandler(() => {
-          document.getElementById("email").innerText = "📧 Email: stopped";
-        }).stopMonitoring();
+        google.script.run.stopMonitoring();
+        document.getElementById("email").innerText = "📧 Email: monitoring stopped";
       }
 
       function getEmail() {
@@ -186,28 +195,27 @@ function doGet() {
       }
 
       function updateLogs() {
-        google.script.run.withSuccessHandler(renderProcess).getLogs();
-        google.script.run.withSuccessHandler(renderSheet).getSheetData();
-        google.script.run.fetchInbox(); // fetch new mail
+        google.script.run.withSuccessHandler(renderProcessLog).getLogs();
+        google.script.run.withSuccessHandler(renderSheetLog).getSheetData();
+        google.script.run.fetchInbox(); // fetch inbox in background
       }
 
-      function renderProcess(data) {
-        document.getElementById("process").innerHTML = "<pre>" + data.join("\n") + "</pre>";
+      function renderProcessLog(logs) {
+        document.getElementById("process").innerHTML = "<pre>" + logs.join("\n") + "</pre>";
       }
 
-      function renderSheet(data) {
+      function renderSheetLog(data) {
         if (!data || data.length === 0) {
-          document.getElementById("sheet").innerHTML = "<pre>No data</pre>";
+          document.getElementById("sheet").innerHTML = "<pre>No spreadsheet data</pre>";
           return;
         }
         const lines = data.map(row => row.join(" | "));
         document.getElementById("sheet").innerHTML = "<pre>" + lines.join("\n") + "</pre>";
       }
 
-      // Initial
       getEmail();
       updateLogs();
-      setInterval(updateLogs, 15000); // every 15 seconds
+      setInterval(updateLogs, 15000); // every 15s
     </script>
   </body>
 </html>
