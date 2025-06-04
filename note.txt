@@ -1,15 +1,12 @@
-let polling = false;
-let token = '';
-let account = {};
-let spreadsheetId = '';
-
-/**
- * Called once to initialize spreadsheet and email account
- */
 function startMonitoring() {
-  if (polling) return ContentService.createTextOutput("Already started");
+  const scriptProps = PropertiesService.getScriptProperties();
 
-  // Generate temp mail account
+  // Skip if already started
+  if (scriptProps.getProperty('monitoring') === 'true') {
+    return ContentService.createTextOutput("Already started");
+  }
+
+  // Get domain for temp email
   const domainRes = UrlFetchApp.fetch('https://api.mail.tm/domains');
   const domain = JSON.parse(domainRes.getContentText())['hydra:member'][0].domain;
   const email = `user${Date.now()}@${domain}`;
@@ -22,81 +19,85 @@ function startMonitoring() {
     payload: JSON.stringify({ address: email, password })
   });
 
-  // Login
+  // Log in to get token
   const loginRes = UrlFetchApp.fetch('https://api.mail.tm/token', {
     method: 'POST',
     contentType: 'application/json',
     payload: JSON.stringify({ address: email, password })
   });
+
   const loginData = JSON.parse(loginRes.getContentText());
-  token = loginData.token;
+  const token = loginData.token;
 
-  // Store email info
-  account = { email, password };
-
-  // Create spreadsheet
+  // Create Google Sheet
   const sheet = SpreadsheetApp.create("TempMail Inbox");
-  spreadsheetId = sheet.getId();
+  const sheetId = sheet.getId();
   const header = ["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body"];
   sheet.getActiveSheet().appendRow(header);
-
-  // Insert STARTED log
   sheet.getActiveSheet().appendRow([email, new Date(), "NULL", "STARTED", "NULL", "NULL", "NULL"]);
 
-  // Start polling
-  polling = true;
-  ScriptApp.newTrigger("fetchInbox")
-           .timeBased()
-           .everyMinutes(1)
-           .create();
+  // Save persistent properties
+  scriptProps.setProperties({
+    monitoring: 'true',
+    email,
+    password,
+    token,
+    sheetId
+  });
 
-  return ContentService.createTextOutput(`Started monitoring with email: ${email}`);
+  // Set time-based trigger
+  ScriptApp.newTrigger('fetchInbox')
+    .timeBased()
+    .everyMinutes(1)
+    .create();
+
+  return ContentService.createTextOutput("Monitoring started with: " + email);
 }
 
-/**
- * Stop monitoring and delete triggers
- */
 function stopMonitoring() {
-  polling = false;
-  const allTriggers = ScriptApp.getProjectTriggers();
-  allTriggers.forEach(trigger => ScriptApp.deleteTrigger(trigger));
-  return ContentService.createTextOutput("Stopped monitoring");
-}
+  const scriptProps = PropertiesService.getScriptProperties();
+  scriptProps.setProperty('monitoring', 'false');
 
-/**
- * Polls inbox and logs to sheet
- */
-function fetchInbox() {
-  if (!polling || !token) return;
-
-  const res = UrlFetchApp.fetch("https://api.mail.tm/messages", {
-    headers: {
-      Authorization: `Bearer ${token}`
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(trigger => {
+    if (trigger.getHandlerFunction() === 'fetchInbox') {
+      ScriptApp.deleteTrigger(trigger);
     }
   });
 
+  return ContentService.createTextOutput("Monitoring stopped.");
+}
+
+function fetchInbox() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('monitoring') !== 'true') return;
+
+  const token = props.getProperty('token');
+  const sheetId = props.getProperty('sheetId');
+  const email = props.getProperty('email');
+
+  const res = UrlFetchApp.fetch("https://api.mail.tm/messages", {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
   const messages = JSON.parse(res.getContentText())['hydra:member'];
-  const sheet = SpreadsheetApp.openById(spreadsheetId).getActiveSheet();
+  const sheet = SpreadsheetApp.openById(sheetId).getActiveSheet();
+  const rows = sheet.getDataRange().getValues();
 
   messages.forEach(msg => {
-    // Skip if already logged
-    const rows = sheet.getDataRange().getValues();
-    if (rows.find(row => row[1] === msg.intro && row[3] === msg.subject)) return;
+    if (rows.some(row => row[1] === msg.createdAt && row[3] === msg.subject)) return;
 
-    // Get full message
     const msgRes = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
+      headers: { Authorization: `Bearer ${token}` }
     });
+
     const fullMsg = JSON.parse(msgRes.getContentText());
 
-    // Extract OTP and Verification Link
     const otpMatch = fullMsg.text.match(/\b\d{4,8}\b/);
     const linkMatch = fullMsg.text.match(/https?:\/\/[^\s]+/g);
 
     const row = [
-      account.email,
+      email,
       msg.createdAt,
       msg.from.address,
       msg.subject,
@@ -108,18 +109,14 @@ function fetchInbox() {
   });
 }
 
-/**
- * Returns all logs to HTML frontend
- */
 function getLogs() {
-  const sheet = SpreadsheetApp.openById(spreadsheetId).getActiveSheet();
-  const values = sheet.getDataRange().getValues();
-  return values;
+  const sheetId = PropertiesService.getScriptProperties().getProperty('sheetId');
+  if (!sheetId) return [];
+
+  const sheet = SpreadsheetApp.openById(sheetId).getActiveSheet();
+  return sheet.getDataRange().getValues();
 }
 
-/**
- * Serve HTML frontend
- */
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index');
 }
@@ -139,16 +136,17 @@ function doGet() {
     <base target="_top">
     <style>
       body { font-family: Arial, sans-serif; padding: 20px; }
-      button { margin: 5px; padding: 8px 16px; }
-      pre { background: #f4f4f4; padding: 12px; border-radius: 6px; white-space: pre-wrap; }
+      button { margin: 5px; padding: 10px 20px; font-size: 16px; }
+      pre { background: #f4f4f4; padding: 12px; border-radius: 6px; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
     </style>
   </head>
   <body>
     <h2>📬 Temp Mail Inbox Monitor</h2>
-    <button onclick="start()">Start Monitoring</button>
-    <button onclick="stop()">Stop Monitoring</button>
+    <button onclick="start()">▶ Start Monitoring</button>
+    <button onclick="stop()">⏹ Stop Monitoring</button>
+
     <h3>📄 Logs</h3>
-    <div id="logs"><pre>Loading...</pre></div>
+    <div id="logs"><pre>Loading logs...</pre></div>
 
     <script>
       function start() {
@@ -168,9 +166,8 @@ function doGet() {
         document.getElementById("logs").innerHTML = `<pre>${formatted}</pre>`;
       }
 
-      // Refresh logs every 5 seconds
       setInterval(fetchLogs, 5000);
-      fetchLogs(); // Initial load
+      fetchLogs(); // Load logs immediately
     </script>
   </body>
 </html>
