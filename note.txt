@@ -1,6 +1,6 @@
 const SHEET_NAME = 'TempMail Logs';
 const LOG_SHEET_NAME = 'Process Logs';
-const ID_COLUMN = 8; // Column H will store Message ID
+const ID_COLUMN = 8; // H column for Message ID
 
 function ensureSpreadsheet() {
   const props = PropertiesService.getScriptProperties();
@@ -22,13 +22,27 @@ function ensureSpreadsheet() {
     const logSheet = ss.insertSheet(LOG_SHEET_NAME);
     logSheet.appendRow(["Timestamp", "Log"]);
 
-    logProcess("✅ New spreadsheet created with ID: " + sheetId);
+    logProcess("✅ New spreadsheet created.");
   } else {
     ss = SpreadsheetApp.openById(sheetId);
   }
 
   lock.releaseLock();
   return ss;
+}
+
+function clearSpreadsheetData() {
+  const ss = ensureSpreadsheet();
+  const inboxSheet = ss.getSheetByName(SHEET_NAME);
+  const logSheet = ss.getSheetByName(LOG_SHEET_NAME);
+
+  inboxSheet.clearContents();
+  inboxSheet.appendRow(["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body", "MessageID"]);
+
+  logSheet.clearContents();
+  logSheet.appendRow(["Timestamp", "Log"]);
+
+  logProcess("🧹 Spreadsheet cleared for new session.");
 }
 
 function logProcess(msg) {
@@ -47,12 +61,13 @@ function stopMonitoring() {
     if (t.getHandlerFunction() === 'fetchInbox') ScriptApp.deleteTrigger(t);
   });
 
-  logProcess("⏹ Monitoring stopped");
+  clearSpreadsheetData();
+  logProcess("⏹ Monitoring stopped and spreadsheet cleared.");
   return "Monitoring stopped.";
 }
 
 function startMonitoring() {
-  stopMonitoring(); // ensure clean restart
+  stopMonitoring(); // Stops and clears previous session
   logProcess("▶ Starting new monitoring session");
 
   const props = PropertiesService.getScriptProperties();
@@ -106,7 +121,7 @@ function fetchInbox() {
   const sheet = ss.getSheetByName(SHEET_NAME);
   const lastRow = sheet.getLastRow();
 
-  const loggedMessageIDs = new Set(
+  const loggedIDs = new Set(
     sheet.getRange(2, ID_COLUMN, lastRow - 1).getValues().flat().filter(id => id)
   );
 
@@ -122,7 +137,7 @@ function fetchInbox() {
   const newRows = [];
 
   messages.forEach(msg => {
-    if (loggedMessageIDs.has(msg.id)) return;
+    if (loggedIDs.has(msg.id)) return;
 
     const fullRes = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
       headers: { Authorization: `Bearer ${token}` }
@@ -170,87 +185,3 @@ function getEmail() {
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index');
 }
-<!DOCTYPE html>
-<html>
-<head>
-  <base target="_top">
-  <style>
-    body { font-family: Arial; padding: 20px; }
-    button { margin: 5px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
-    pre {
-      background: #f0f0f0;
-      padding: 10px;
-      border-radius: 5px;
-      max-height: 300px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-    }
-    #emailContainer {
-      margin-top: 10px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    #copyBtn {
-      padding: 5px 10px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-  </style>
-</head>
-<body>
-  <h2>📧 TempMail Monitor</h2>
-  <button onclick="start()">▶ Start Monitoring</button>
-  <button onclick="stop()">⏹ Stop Monitoring</button>
-
-  <div id="emailContainer">
-    <span id="email">📭 Temp Email: Not started</span>
-    <button id="copyBtn" onclick="copyEmail()">📋 Copy</button>
-  </div>
-
-  <h3>🛠 Process Logs</h3>
-  <div id="processLogs"><pre>Loading...</pre></div>
-
-  <h3>📄 Spreadsheet Logs</h3>
-  <div id="sheetLogs"><pre>Loading...</pre></div>
-
-  <script>
-    function start() {
-      document.getElementById("email").innerText = "📭 Temp Email: Starting...";
-      google.script.run.withSuccessHandler(email => {
-        document.getElementById("email").innerText = "📭 Temp Email: " + email;
-        refresh();
-      }).startMonitoring();
-    }
-
-    function stop() {
-      google.script.run.withSuccessHandler(() => {
-        document.getElementById("email").innerText = "📭 Temp Email: Monitoring stopped";
-      }).stopMonitoring();
-    }
-
-    function copyEmail() {
-      const text = document.getElementById("email").innerText.replace("📭 Temp Email: ", "").trim();
-      navigator.clipboard.writeText(text).then(() => {
-        document.getElementById("copyBtn").innerText = "✅ Copied";
-        setTimeout(() => document.getElementById("copyBtn").innerText = "📋 Copy", 2000);
-      });
-    }
-
-    function refresh() {
-      google.script.run.withSuccessHandler(data => {
-        const logs = data.map(r => `${r[0]} | ${r[1] || ''}`).join('\n');
-        document.getElementById("processLogs").innerHTML = `<pre>${logs}</pre>`;
-      }).getProcessLogs();
-
-      google.script.run.withSuccessHandler(data => {
-        const logs = data.map(r => r.join(' | ')).join('\n');
-        document.getElementById("sheetLogs").innerHTML = `<pre>${logs}</pre>`;
-      }).getLogs();
-    }
-
-    setInterval(refresh, 5000); // refresh logs every 5 seconds
-    refresh();
-  </script>
-</body>
-</html>
