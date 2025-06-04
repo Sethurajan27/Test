@@ -1,31 +1,75 @@
-import os
-from dotenv import load_dotenv
+# News site credentials (rename to .env)
+NEWS_URL=https://example.news/login
+NEWS_USERNAME=your@email.com
+NEWS_PASSWORD=your_password_123
+NEWS_USERNAME_FIELD=email_field
+NEWS_PASSWORD_FIELD=pass_field
+NEWS_LOGIN_BUTTON=login_btn
+HEADLESS=true
 
-def get_config():
-    """Load settings from .env file"""
-    load_dotenv()
-    
-    required_vars = [
-        'NEWS_URL',
-        'NEWS_USERNAME',
-        'NEWS_PASSWORD',
-        'NEWS_USERNAME_FIELD',
-        'NEWS_PASSWORD_FIELD',
-        'NEWS_LOGIN_BUTTON'
-    ]
-    
-    config = {
-        'url': os.getenv('NEWS_URL'),
-        'username': os.getenv('NEWS_USERNAME'),
-        'password': os.getenv('NEWS_PASSWORD'),
-        'username_field': os.getenv('NEWS_USERNAME_FIELD'),
-        'password_field': os.getenv('NEWS_PASSWORD_FIELD'),
-        'login_button': os.getenv('NEWS_LOGIN_BUTTON'),
-        'headless': os.getenv('HEADLESS', 'true').lower() == 'true'
-    }
-    
-    missing = [var for var in required_vars if not os.getenv(var)]
-    if missing:
-        raise ValueError(f"Missing env vars: {', '.join(missing)}")
-    
-    return config
+
+selenium==4.9.1
+webdriver-manager==3.8.6
+python-dotenv==1.0.0
+pytest==7.4.0
+
+
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Environment
+.env
+*.env
+
+# Screenshots
+screenshots/
+
+# IDE
+.vscode/
+.idea/
+
+
+
+
+
+
+
+# 📰 News Site Login Automation
+
+Automates login for news websites using Selenium WebDriver.
+
+## 🛠 Setup
+1. Clone repository:
+   ```bash
+   git clone https://github.com/yourusername/news.git
+   cd news
+   ```
+
+2. Configure environment:
+   ```bash
+   cp .env.example .env
+   nano .env  # Add your actual credentials
+   ```
+
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+## 🚀 Usage
+```bash
+python -m src.news_login
+```
+
+## 📸 Screenshots
+- Success: `screenshots/login_success.png`
+- Failure: `screenshots/login_failed.png`
+
+## ⚙️ GitHub Actions
+Automatically runs on push:
+1. Installs Chrome
+2. Runs login test
+3. Uploads screenshots as artifacts
