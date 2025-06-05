@@ -1,27 +1,21 @@
-name: Tamil News Automation
-
-on:
-  workflow_dispatch:  # Manual trigger
-  schedule:
-    - cron: '0 2,8,14,20 * * *'  # 7:30am, 1:30pm, 7:30pm, 1:30am IST
-
-jobs:
-  run-news-pipeline:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run Tamil News Main Script
-        run: python main.py
+Run python main.py
+/opt/hostedtoolcache/Python/3.11.12/x64/lib/python3.11/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.mail.tm'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/opt/hostedtoolcache/Python/3.11.12/x64/lib/python3.11/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.mail.tm'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/opt/hostedtoolcache/Python/3.11.12/x64/lib/python3.11/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.mail.tm'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+Traceback (most recent call last):
+  File "/home/runner/work/tamil-news/tamil-news/main.py", line 38, in <module>
+    main()
+  File "/home/runner/work/tamil-news/tamil-news/main.py", line 9, in main
+    mail_client = MailTMClient()
+                  ^^^^^^^^^^^^^^
+  File "/home/runner/work/tamil-news/tamil-news/src/mailtm_client.py", line 9, in __init__
+    self.token = self.get_token()
+                 ^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tamil-news/tamil-news/src/mailtm_client.py", line 20, in get_token
+    return response.json()['token']
+           ~~~~~~~~~~~~~~~^^^^^^^^^
+KeyError: 'token'
+Error: Process completed with exit code 1.
