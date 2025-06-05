@@ -1,44 +1,25 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-import tempfile
-import os
-
-def init_driver(headless=True):
-    options = Options()
-
-    # ✅ Always enable headless mode for CI (GitHub Actions)
-    options.add_argument("--headless=new")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-
-    # ✅ Use a unique temporary user data directory
-    user_data_dir = tempfile.mkdtemp()
-    options.add_argument(f"--user-data-dir={user_data_dir}")
-
-    # ✅ Avoid using extensions and background network calls
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-background-networking")
-    options.add_argument("--disable-default-apps")
-    options.add_argument("--disable-sync")
-    options.add_argument("--metrics-recording-only")
-    options.add_argument("--disable-notifications")
-
-    driver = webdriver.Chrome(options=options)
-    return driver
-
-
-
-
-
-
-from src.openai_signup import init_driver
-
-def main():
-    driver = init_driver()  # No need for headless=False
-    ...
-
-
-git add src/openai_signup.py main.py
-git commit -m "🚑 Fix Chrome profile reuse issue in CI"
-git push origin main
+Run python main.py
+  python main.py
+  shell: /usr/bin/bash -e {0}
+  env:
+    pythonLocation: /opt/hostedtoolcache/Python/3.11.12/x64
+    PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.12/x64/lib/pkgconfig
+    Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.12/x64
+    Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.12/x64
+    Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.12/x64
+    LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.12/x64/lib
+Traceback (most recent call last):
+📥 Domain response: {'@context': '/contexts/Domain', '@id': '/domains', '@type': 'hydra:Collection', 'hydra:totalItems': 1, 'hydra:member': [{'@id': '/domains/683e285734eb9ac6bea7bca6', '@type': 'Domain', 'id': '683e285734eb9ac6bea7bca6', 'domain': 'punkproof.com', 'isActive': True, 'isPrivate': False, 'createdAt': '2025-06-02T00:00:00+00:00', 'updatedAt': '2025-06-02T00:00:00+00:00'}]}
+  File "/home/runner/work/tamil-news/tamil-news/main.py", line 38, in <module>
+📤 Account creation response: 201 {"@context":"\/contexts\/Account","@id":"\/accounts\/6841407642395339b50379ac","@type":"Account","id":"6841407642395339b50379ac","address":"news_2e014a3d@punkproof.com","quota":40000000,"used":0,"isDisabled":false,"isDeleted":false,"createdAt":"2025-06-05T07:00:06+00:00","updatedAt":"2025-06-05T07:00:06+00:00"}
+    main()
+  File "/home/runner/work/tamil-news/tamil-news/main.py", line 13, in main
+    openai_signup(driver, mail_client)
+  File "/home/runner/work/tamil-news/tamil-news/src/openai_signup.py", line 37, in openai_signup
+    email = mail_client.account['email']
+            ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'MailTMClient' object has no attribute 'account'
+🔐 Token response: 200 {"token":"***","@id":"\/accounts\/6841407642395339b50379ac","id":"6841407642395339b50379ac"}
+✅ Account ready: news_2e014a3d@punkproof.com
+🔐 Signing up for OpenAI...
+Error: Process completed with exit code 1.
