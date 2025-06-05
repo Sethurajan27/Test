@@ -1,25 +1,72 @@
-Run python main.py
-  python main.py
-  shell: /usr/bin/bash -e {0}
-  env:
-    pythonLocation: /opt/hostedtoolcache/Python/3.11.12/x64
-    PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.12/x64/lib/pkgconfig
-    Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.12/x64
-    Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.12/x64
-    Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.12/x64
-    LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.12/x64/lib
-Traceback (most recent call last):
-📥 Domain response: {'@context': '/contexts/Domain', '@id': '/domains', '@type': 'hydra:Collection', 'hydra:totalItems': 1, 'hydra:member': [{'@id': '/domains/683e285734eb9ac6bea7bca6', '@type': 'Domain', 'id': '683e285734eb9ac6bea7bca6', 'domain': 'punkproof.com', 'isActive': True, 'isPrivate': False, 'createdAt': '2025-06-02T00:00:00+00:00', 'updatedAt': '2025-06-02T00:00:00+00:00'}]}
-  File "/home/runner/work/tamil-news/tamil-news/main.py", line 38, in <module>
-📤 Account creation response: 201 {"@context":"\/contexts\/Account","@id":"\/accounts\/6841407642395339b50379ac","@type":"Account","id":"6841407642395339b50379ac","address":"news_2e014a3d@punkproof.com","quota":40000000,"used":0,"isDisabled":false,"isDeleted":false,"createdAt":"2025-06-05T07:00:06+00:00","updatedAt":"2025-06-05T07:00:06+00:00"}
-    main()
-  File "/home/runner/work/tamil-news/tamil-news/main.py", line 13, in main
-    openai_signup(driver, mail_client)
-  File "/home/runner/work/tamil-news/tamil-news/src/openai_signup.py", line 37, in openai_signup
-    email = mail_client.account['email']
-            ^^^^^^^^^^^^^^^^^^^
-AttributeError: 'MailTMClient' object has no attribute 'account'
-🔐 Token response: 200 {"token":"***","@id":"\/accounts\/6841407642395339b50379ac","id":"6841407642395339b50379ac"}
-✅ Account ready: news_2e014a3d@punkproof.com
-🔐 Signing up for OpenAI...
-Error: Process completed with exit code 1.
+import requests
+
+class MailTMClient:
+    BASE_URL = "https://api.mail.tm"
+
+    def __init__(self):
+        self.domain = self.get_domain()
+        self.account = self.create_account()
+        self.token = self.get_token()
+
+    def get_domain(self):
+        response = requests.get(f"{self.BASE_URL}/domains")
+        data = response.json()
+        domain = data["hydra:member"][0]["domain"]
+        print(f"📥 Domain response: {data}")
+        return domain
+
+    def create_account(self):
+        from uuid import uuid4
+        self.email = f"news_{uuid4().hex[:8]}@{self.domain}"
+        self.password = "Password@123"
+
+        response = requests.post(f"{self.BASE_URL}/accounts", json={
+            "address": self.email,
+            "password": self.password
+        })
+        print(f"📤 Account creation response: {response.status_code} {response.text}")
+        return {
+            "email": self.email,
+            "password": self.password,
+            "id": response.json()["id"]
+        }
+
+    def get_token(self):
+        response = requests.post(f"{self.BASE_URL}/token", json={
+            "address": self.account["email"],
+            "password": self.account["password"]
+        })
+        data = response.json()
+        print(f"🔐 Token response: {response.status_code} {response.text}")
+        return data["token"]
+
+    def get_messages(self):
+        headers = {"Authorization": f"Bearer {self.token}"}
+        response = requests.get(f"{self.BASE_URL}/messages", headers=headers)
+        return response.json()
+
+    def wait_for_email(self, subject_keyword, timeout=60):
+        import time
+        start = time.time()
+        while time.time() - start < timeout:
+            messages = self.get_messages()
+            for msg in messages.get("hydra:member", []):
+                if subject_keyword in msg["subject"]:
+                    return msg
+            time.sleep(5)
+        raise TimeoutError(f"Timeout waiting for email with subject '{subject_keyword}'")
+
+
+
+
+
+def openai_signup(driver, mail_client):
+    print("🔐 Signing up for OpenAI...")
+    email = mail_client.account["email"]
+    ...
+
+
+
+git add src/mailtm_client.py
+git commit -m "🐛 Fix MailTMClient to expose .account attribute"
+git push origin main
