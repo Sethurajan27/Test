@@ -1,5 +1,6 @@
 https://chatgpt.com/share/68411062-7efc-800a-9513-61e166bd0b54
 
+GOOGLE_DRIVE_FOLDER_ID=1zWdn50DVXpBWcuX62wP2UoR0M2WU6_jb
 
 
 # Folder Structure
