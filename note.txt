@@ -1,28 +1,65 @@
-Run python main.py
-  python main.py
-  shell: /usr/bin/bash -e {0}
-  env:
-    pythonLocation: /opt/hostedtoolcache/Python/3.11.12/x64
-    PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.12/x64/lib/pkgconfig
-    Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.12/x64
-    Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.12/x64
-    Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.12/x64
-    LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.12/x64/lib
-/opt/hostedtoolcache/Python/3.11.12/x64/lib/python3.11/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.mail.tm'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
-  warnings.warn(
-/opt/hostedtoolcache/Python/3.11.12/x64/lib/python3.11/site-packages/urllib3/connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.mail.tm'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
-  warnings.warn(
-Traceback (most recent call last):
-  File "/home/runner/work/tamil-news/tamil-news/main.py", line 38, in <module>
-    main()
-  File "/home/runner/work/tamil-news/tamil-news/main.py", line 9, in main
-    mail_client = MailTMClient()
-                  ^^^^^^^^^^^^^^
-  File "/home/runner/work/tamil-news/tamil-news/src/mailtm_client.py", line 10, in __init__
-    self.token = self.get_token()
-                 ^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tamil-news/tamil-news/src/mailtm_client.py", line 25, in get_token
-    "address": self.account["address"],
-               ~~~~~~~~~~~~^^^^^^^^^^^
-KeyError: 'address'
-Error: Process completed with exit code 1.
+import random
+import string
+import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+class MailTMClient:
+    def __init__(self):
+        self.base_url = "https://api.mail.tm"
+        self.session = requests.Session()
+        self.account = self.create_account()
+        self.token = self.get_token()
+
+    def create_account(self):
+        domain_resp = self.session.get(f'{self.base_url}/domains', verify=False)
+        domain_data = domain_resp.json()
+        domain = domain_data['hydra:member'][0]['domain']
+
+        username = ''.join(random.choices(string.ascii_lowercase, k=10))
+        password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
+        email = f"{username}@{domain}"
+        data = {
+            "address": email,
+            "password": password
+        }
+
+        response = self.session.post(f'{self.base_url}/accounts', json=data, verify=False)
+
+        # 🔍 Log response for debugging
+        print("Mail.tm Account Creation Response:")
+        print(response.text)
+
+        if response.status_code != 201:
+            raise Exception(f"Mail.tm account creation failed: {response.status_code} - {response.text}")
+
+        return {
+            "address": email,
+            "password": password
+        }
+
+    def get_token(self):
+        data = {
+            "address": self.account["address"],
+            "password": self.account["password"]
+        }
+        response = self.session.post(f'{self.base_url}/token', json=data, verify=False)
+
+        print("Token Response:")
+        print(response.text)
+
+        if response.status_code != 200:
+            raise Exception(f"Token fetch failed: {response.status_code} - {response.text}")
+
+        return response.json()['token']
+
+
+
+
+
+
+
+
+git add src/mailtm_client.py
+git commit -m "🔧 Add debug logging for Mail.tm account creation"
+git push origin main
