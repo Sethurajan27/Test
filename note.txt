@@ -1,58 +1,70 @@
-import random
+import os
+import time
 import string
+import random
 import requests
 import urllib3
+
+# Disable HTTPS warnings (you may remove in production)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class MailTMClient:
+    BASE_URL = "https://api.mail.tm"
+
     def __init__(self):
-        self.base_url = "https://api.mail.tm"
         self.session = requests.Session()
-        self.account = self.create_account()
-        self.token = self.get_token()
+        self.token = None
+        self.address = None
+        self.password = None
+        self.create_account()
 
     def create_account(self):
-        domain_resp = self.session.get(f'{self.base_url}/domains', verify=False)
+        # Step 1: Get domain
+        domain_resp = self.session.get(f"{self.BASE_URL}/domains", verify=False)
         domain_data = domain_resp.json()
+        print("📥 Domain response:", domain_data)
+
         domain = domain_data['hydra:member'][0]['domain']
 
-        username = ''.join(random.choices(string.ascii_lowercase, k=10))
-        password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
-        email = f"{username}@{domain}"
-        data = {
-            "address": email,
-            "password": password
-        }
+        # Step 2: Generate email and password
+        self.address = f"news_{os.urandom(4).hex()}@{domain}"
+        self.password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
 
-        response = self.session.post(f'{self.base_url}/accounts', json=data, verify=False)
+        # Step 3: Create account
+        acc_data = {"address": self.address, "password": self.password}
+        acc_resp = self.session.post(f"{self.BASE_URL}/accounts", json=acc_data, verify=False)
+        print("📤 Account creation response:", acc_resp.status_code, acc_resp.text)
 
-        # 🔍 Log response for debugging
-        print("Mail.tm Account Creation Response:")
-        print(response.text)
+        if acc_resp.status_code != 201:
+            raise Exception(f"❌ Account creation failed: {acc_resp.text}")
 
-        if response.status_code != 201:
-            raise Exception(f"Mail.tm account creation failed: {response.status_code} - {response.text}")
+        # Step 4: Get token
+        token_resp = self.session.post(f"{self.BASE_URL}/token", json=acc_data, verify=False)
+        print("🔐 Token response:", token_resp.status_code, token_resp.text)
 
-        return {
-            "address": email,
-            "password": password
-        }
+        if token_resp.status_code != 200:
+            raise Exception(f"❌ Token fetch failed: {token_resp.text}")
 
-    def get_token(self):
-        data = {
-            "address": self.account["address"],
-            "password": self.account["password"]
-        }
-        response = self.session.post(f'{self.base_url}/token', json=data, verify=False)
+        self.token = token_resp.json()["token"]
+        self.session.headers.update({"Authorization": f"Bearer {self.token}"})
+        print(f"✅ Account ready: {self.address}")
 
-        print("Token Response:")
-        print(response.text)
+    def wait_for_email(self, subject_filter, timeout=300):
+        start = time.time()
+        while time.time() - start < timeout:
+            inbox_resp = self.session.get(f"{self.BASE_URL}/messages", verify=False)
+            inbox = inbox_resp.json()
+            print("📬 Inbox check:", inbox)
 
-        if response.status_code != 200:
-            raise Exception(f"Token fetch failed: {response.status_code} - {response.text}")
+            for msg in inbox.get('hydra:member', []):
+                if subject_filter in msg['subject']:
+                    msg_id = msg['id']
+                    message = self.session.get(f"{self.BASE_URL}/messages/{msg_id}", verify=False).json()
+                    print("📧 Email received:", message['subject'])
+                    return message['text']
 
-        return response.json()['token']
-
+            time.sleep(5)
+        raise TimeoutError("⏰ Email not received in time.")
 
 
 
@@ -61,5 +73,5 @@ class MailTMClient:
 
 
 git add src/mailtm_client.py
-git commit -m "🔧 Add debug logging for Mail.tm account creation"
+git commit -m "✅ Fix MailTM crashes and add debug logs"
 git push origin main
