@@ -1,50 +1,27 @@
-Run python main.py
-Traceback (most recent call last):
-📥 Domain response: {'@context': '/contexts/Domain', '@id': '/domains', '@type': 'hydra:Collection', 'hydra:totalItems': 1, 'hydra:member': [{'@id': '/domains/683e285734eb9ac6bea7bca6', '@type': 'Domain', 'id': '683e285734eb9ac6bea7bca6', 'domain': 'punkproof.com', 'isActive': True, 'isPrivate': False, 'createdAt': '2025-06-02T00:00:00+00:00', 'updatedAt': '2025-06-02T00:00:00+00:00'}]}
-  File "/home/runner/work/tamil-news/tamil-news/main.py", line 38, in <module>
-    main()
-  File "/home/runner/work/tamil-news/tamil-news/main.py", line 10, in main
-    driver = init_driver(headless=False)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tamil-news/tamil-news/src/openai_signup.py", line 14, in init_driver
-    driver = webdriver.Chrome(options=options)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.12/x64/lib/python3.11/site-packages/selenium/webdriver/chrome/webdriver.py", line 45, in __init__
-    super().__init__(
-  File "/opt/hostedtoolcache/Python/3.11.12/x64/lib/python3.11/site-packages/selenium/webdriver/chromium/webdriver.py", line 66, in __init__
-    super().__init__(command_executor=executor, options=options)
-  File "/opt/hostedtoolcache/Python/3.11.12/x64/lib/python3.11/site-packages/selenium/webdriver/remote/webdriver.py", line 208, in __init__
-    self.start_session(capabilities)
-  File "/opt/hostedtoolcache/Python/3.11.12/x64/lib/python3.11/site-packages/selenium/webdriver/remote/webdriver.py", line 292, in start_session
-    response = self.execute(Command.NEW_SESSION, caps)["value"]
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.12/x64/lib/python3.11/site-packages/selenium/webdriver/remote/webdriver.py", line 347, in execute
-    self.error_handler.check_response(response)
-  File "/opt/hostedtoolcache/Python/3.11.12/x64/lib/python3.11/site-packages/selenium/webdriver/remote/errorhandler.py", line 229, in check_response
-    raise exception_class(message, screen, stacktrace)
-selenium.common.exceptions.SessionNotCreatedException: Message: session not created: probably user data directory is already in use, please specify a unique value for --user-data-dir argument, or don't use --user-data-dir
-Stacktrace:
-#0 0x5561916d578a <unknown>
-#1 0x5561911780a0 <unknown>
-#2 0x5561911b21ff <unknown>
-#3 0x5561911adc0f <unknown>
-#4 0x5561911fdd75 <unknown>
-#5 0x5561911fd296 <unknown>
-#6 0x5561911ef173 <unknown>
-#7 0x5561911bbd4b <unknown>
-#8 0x5561911bc9b1 <unknown>
-#9 0x55619169a93b <unknown>
-#10 0x55619169e83a <unknown>
-#11 0x556191682692 <unknown>
-#12 0x55619169f3c4 <unknown>
-#13 0x5561916674cf <unknown>
-#14 0x5561916c3568 <unknown>
-#15 0x5561916c3746 <unknown>
-#16 0x5561916d45f6 <unknown>
-#17 0x7f01f069caa4 <unknown>
-#18 0x7f01f0729c3c <unknown>
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+import tempfile
 
-📤 Account creation response: 201 {"@context":"\/contexts\/Account","@id":"\/accounts\/68413a5ea17fc85ad60515a0","@type":"Account","id":"68413a5ea17fc85ad60515a0","address":"news_dfba4d28@punkproof.com","quota":40000000,"used":0,"isDisabled":false,"isDeleted":false,"createdAt":"2025-06-05T06:34:06+00:00","updatedAt":"2025-06-05T06:34:06+00:00"}
-🔐 Token response: 200 {"token":"***","@id":"\/accounts\/68413a5ea17fc85ad60515a0","id":"68413a5ea17fc85ad60515a0"}
-✅ Account ready: news_dfba4d28@punkproof.com
-Error: Process completed with exit code 1.
+def init_driver(headless=True):
+    options = Options()
+    if headless:
+        options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
+    # ✅ FIX: use temporary unique user-data-dir for GitHub Actions
+    temp_profile = tempfile.mkdtemp()
+    options.add_argument(f"--user-data-dir={temp_profile}")
+
+    driver = webdriver.Chrome(options=options)
+    return driver
+
+
+
+
+
+
+git add src/openai_signup.py
+git commit -m "🐛 Fix Selenium user-data-dir for GitHub Actions"
+git push origin main
