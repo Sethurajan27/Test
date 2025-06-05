@@ -1,12 +1,27 @@
-name: Test mail.tm
+name: Tamil News Automation
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger
+  schedule:
+    - cron: '0 2,8,14,20 * * *'  # 7:30am, 1:30pm, 7:30pm, 1:30am IST
 
 jobs:
-  test-mailtm:
+  run-news-pipeline:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Test mail.tm API
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
         run: |
-          curl -s https://api.mail.tm/domains || echo "Failed to reach mail.tm"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Tamil News Main Script
+        run: python main.py
