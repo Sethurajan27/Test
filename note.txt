@@ -1,48 +1,9 @@
-Run python main.py
-  python main.py
-  shell: /usr/bin/bash -e {0}
-  env:
-    pythonLocation: /opt/hostedtoolcache/Python/3.11.12/x64
-    PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.12/x64/lib/pkgconfig
-    Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.12/x64
-    Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.12/x64
-    Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.12/x64
-    LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.12/x64/lib
-Traceback (most recent call last):
-  File "/home/runner/work/tamil-news/tamil-news/main.py", line 38, in <module>
-📥 Domain response: {'@context': '/contexts/Domain', '@id': '/domains', '@type': 'hydra:Collection', 'hydra:totalItems': 1, 'hydra:member': [{'@id': '/domains/683e285734eb9ac6bea7bca6', '@type': 'Domain', 'id': '683e285734eb9ac6bea7bca6', 'domain': 'punkproof.com', 'isActive': True, 'isPrivate': False, 'createdAt': '2025-06-02T00:00:00+00:00', 'updatedAt': '2025-06-02T00:00:00+00:00'}]}
-📤 Account creation response: 201 {"@context":"\/contexts\/Account","@id":"\/accounts\/68414289fc330a6628009a28","@type":"Account","id":"68414289fc330a6628009a28","address":"news_e70ce354@punkproof.com","quota":40000000,"used":0,"isDisabled":false,"isDeleted":false,"createdAt":"2025-06-05T07:08:57+00:00","updatedAt":"2025-06-05T07:08:57+00:00"}
-🔐 Token response: 200 {"token":"***","@id":"\/accounts\/68414289fc330a6628009a28","id":"68414289fc330a6628009a28"}
-🔐 Signing up for OpenAI...
-    main()
-  File "/home/runner/work/tamil-news/tamil-news/main.py", line 13, in main
-    openai_signup(driver, mail_client)
-  File "/home/runner/work/tamil-news/tamil-news/src/openai_signup.py", line 41, in openai_signup
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, 'email'))).send_keys(email)
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.12/x64/lib/python3.11/site-packages/selenium/webdriver/support/wait.py", line 105, in until
-    raise TimeoutException(message, screen, stacktrace)
-selenium.common.exceptions.TimeoutException: Message: 
-Stacktrace:
-#0 0x55d37350178a <unknown>
-#1 0x55d372fa40a0 <unknown>
-#2 0x55d372ff59b0 <unknown>
-#3 0x55d372ff5ba1 <unknown>
-#4 0x55d373043ea4 <unknown>
-#5 0x55d37301b3cd <unknown>
-#6 0x55d3730412a0 <unknown>
-#7 0x55d37301b173 <unknown>
-#8 0x55d372fe7d4b <unknown>
-#9 0x55d372fe89b1 <unknown>
-#10 0x55d3734c693b <unknown>
-#11 0x55d3734ca83a <unknown>
-#12 0x55d3734ae692 <unknown>
-#13 0x55d3734cb3c4 <unknown>
-#14 0x55d3734934cf <unknown>
-#15 0x55d3734ef568 <unknown>
-#16 0x55d3734ef746 <unknown>
-#17 0x55d3735005f6 <unknown>
-#18 0x7f5dc7c9caa4 <unknown>
-#19 0x7f5dc7d29c3c <unknown>
+print(driver.current_url)
+print(driver.page_source)
+driver.save_screenshot("screenshot.png")
 
-Error: Process completed with exit code 1.
+
+
+git add src/openai_signup.py
+git commit -m "🔍 Add debug info to investigate OpenAI signup page load"
+git push origin main
