@@ -1,64 +1,53 @@
-function extractOpenAiOtp(emailText) {
-  // Match a 6-digit number likely used as an OTP
-  const otpMatch = emailText.match(/\b\d{6}\b/);
-  return otpMatch ? otpMatch[0] : "NULL";
-}
+from playwright.sync_api import sync_playwright
 
+def automate_openai_signup():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)  # Set headless=True to run in background
+        context = browser.new_context()
+        page = context.new_page()
 
-function fetchInbox() {
-  const props = PropertiesService.getScriptProperties();
-  if (props.getProperty('monitoring') !== 'true') return;
+        # Step 1: Navigate to signup page
+        page.goto("https://auth.openai.com/create-account")
+        page.fill('input[type="email"]', 'user@example.com')
+        page.click('button:has-text("Continue")')
+        
+        # Wait for password field
+        page.wait_for_url("**/password")
+        page.fill('input[type="password"]', 'Password1@chatgpt')
+        page.click('button:has-text("Continue")')
+        
+        # Wait for email verification page
+        page.wait_for_url("**/email-verification")
+        print("Please enter the code manually from your email.")
+        page.pause()  # Wait for manual OTP entry
 
-  const token = props.getProperty('token');
-  const email = props.getProperty('email');
-  const ss = ensureSpreadsheet();
-  const sheet = ss.getSheetByName(SHEET_NAME);
-  const lastRow = sheet.getLastRow();
+        # Step: About You
+        page.wait_for_url("**/about-you")
+        name = 'user@example.com'.split('@')[0]
+        name = ''.join(filter(lambda c: not c.isdigit(), name))
+        page.fill('input[name="fullName"]', name)
+        page.fill('input[name="dob"]', '11-11-1999')
+        page.click('button:has-text("Continue")')
 
-  const loggedIDs = new Set(
-    sheet.getRange(2, ID_COLUMN, lastRow - 1).getValues().flat().filter(id => id)
-  );
+        # Step: Create Organization
+        page.wait_for_url("**/welcome?step=create")
+        page.fill('input[name="organizationName"]', 'Personal')
+        page.click('button:has-text("Create organization")')
 
-  const inboxRes = UrlFetchApp.fetch("https://api.mail.tm/messages", {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+        # Step: Invite
+        page.wait_for_url("**/welcome?step=invite")
+        page.click("button:has-text(\"I'll invite my team later\")")
+        #page.click('button:has-text("I'll invite my team later")')
 
-  const messages = JSON.parse(inboxRes.getContentText())['hydra:member'];
-  if (!messages || messages.length === 0) return;
+        # Step: Try
+        page.wait_for_url("**/welcome?step=try")
+        page.click('button:has-text("Generate API key")')
 
-  logProcess(`📩 Fetched ${messages.length} messages`);
+        # Get API key
+        page.wait_for_selector('[data-testid="api-key"]')
+        api_key = page.inner_text('[data-testid="api-key"]')
+        print("Generated API Key:", api_key)
 
-  const newRows = [];
+        browser.close()
 
-  messages.forEach(msg => {
-    if (loggedIDs.has(msg.id)) return;
-
-    const fullRes = UrlFetchApp.fetch(`https://api.mail.tm/messages/${msg.id}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    const full = JSON.parse(fullRes.getContentText());
-
-    const otp = extractOpenAiOtp(full.text);
-    const verificationUrls = extractVerificationUrls(full.text);
-    const link = verificationUrls.length > 0 ? verificationUrls[0] : "NULL";
-
-    newRows.push([
-      email,
-      msg.createdAt,
-      msg.from.address,
-      msg.subject,
-      otp,
-      link,
-      full.text,
-      msg.id
-    ]);
-
-    logProcess("✅ Logged new message: " + msg.subject);
-  });
-
-  if (newRows.length) {
-    sheet.getRange(lastRow + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
-  } else {
-    logProcess("ℹ️ No new messages to log.");
-  }
-}
+automate_openai_signup()
