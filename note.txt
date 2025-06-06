@@ -1,121 +1,9 @@
-const SHEET_NAME = 'TempMail Logs';
-const LOG_SHEET_NAME = 'Process Logs';
-const ID_COLUMN = 8; // H column for Message ID
-
-function ensureSpreadsheet() {
-  const props = PropertiesService.getScriptProperties();
-  const lock = LockService.getScriptLock();
-  lock.waitLock(5000);
-
-  let sheetId = props.getProperty('sheetId');
-  let ss;
-
-  if (!sheetId) {
-    ss = SpreadsheetApp.create("TempMail Inbox Logs");
-    sheetId = ss.getId();
-    props.setProperty('sheetId', sheetId);
-
-    const inboxSheet = ss.getActiveSheet();
-    inboxSheet.setName(SHEET_NAME);
-    inboxSheet.appendRow(["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body", "MessageID"]);
-
-    const logSheet = ss.insertSheet(LOG_SHEET_NAME);
-    logSheet.appendRow(["Timestamp", "Log"]);
-
-    logProcess("✅ New spreadsheet created.");
-  } else {
-    ss = SpreadsheetApp.openById(sheetId);
-  }
-
-  lock.releaseLock();
-  return ss;
+function extractOpenAiOtp(emailText) {
+  // Match a 6-digit number likely used as an OTP
+  const otpMatch = emailText.match(/\b\d{6}\b/);
+  return otpMatch ? otpMatch[0] : "NULL";
 }
 
-function clearSpreadsheetData() {
-  const ss = ensureSpreadsheet();
-  const inboxSheet = ss.getSheetByName(SHEET_NAME);
-  const logSheet = ss.getSheetByName(LOG_SHEET_NAME);
-
-  inboxSheet.clearContents();
-  inboxSheet.appendRow(["MyMailId", "Timestamp", "SenderMailId", "Subject", "OTP", "VerificationLink", "Body", "MessageID"]);
-
-  logSheet.clearContents();
-  logSheet.appendRow(["Timestamp", "Log"]);
-
-  logProcess("🧹 Spreadsheet cleared for new session.");
-}
-
-function logProcess(msg) {
-  const ss = ensureSpreadsheet();
-  const logSheet = ss.getSheetByName(LOG_SHEET_NAME);
-  logSheet.appendRow([new Date(), msg]);
-}
-
-function stopMonitoring() {
-  const props = PropertiesService.getScriptProperties();
-  props.setProperty('monitoring', 'false');
-  props.deleteProperty('token');
-  props.deleteProperty('email');
-
-  ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() === 'fetchInbox') ScriptApp.deleteTrigger(t);
-  });
-
-  clearSpreadsheetData();
-  logProcess("⏹ Monitoring stopped and spreadsheet cleared.");
-  return "Monitoring stopped.";
-}
-
-function startMonitoring() {
-  stopMonitoring(); // Stops and clears previous session
-  logProcess("▶ Starting new monitoring session");
-
-  const props = PropertiesService.getScriptProperties();
-  props.setProperty('monitoring', 'true');
-
-  const domainRes = UrlFetchApp.fetch('https://api.mail.tm/domains');
-  const domain = JSON.parse(domainRes.getContentText())['hydra:member'][0].domain;
-  const email = `user${Date.now()}@${domain}`;
-  const password = `Pass${Date.now()}`;
-
-  logProcess("🛠 Creating temp account: " + email);
-
-  UrlFetchApp.fetch('https://api.mail.tm/accounts', {
-    method: 'POST',
-    contentType: 'application/json',
-    payload: JSON.stringify({ address: email, password })
-  });
-
-  const loginRes = UrlFetchApp.fetch('https://api.mail.tm/token', {
-    method: 'POST',
-    contentType: 'application/json',
-    payload: JSON.stringify({ address: email, password })
-  });
-
-  const token = JSON.parse(loginRes.getContentText()).token;
-
-  props.setProperty('token', token);
-  props.setProperty('email', email);
-
-  const ss = ensureSpreadsheet();
-  const inboxSheet = ss.getSheetByName(SHEET_NAME);
-  inboxSheet.appendRow([email, new Date(), "NULL", "STARTED", "NULL", "NULL", "NULL", "NULL"]);
-
-  logProcess("✅ Monitoring started with temp email: " + email);
-
-  ScriptApp.newTrigger('fetchInbox')
-    .timeBased()
-    .everyMinutes(1)
-    .create();
-
-  return email;
-}
-
-function extractVerificationUrls(emailText) {
-  const urlPattern = /https:\/\/elevenlabs\.io\/app\/action\?mode=verifyEmail&[^)\s]+/g;
-  const matches = emailText.match(urlPattern);
-  return matches || [];
-}
 
 function fetchInbox() {
   const props = PropertiesService.getScriptProperties();
@@ -150,7 +38,7 @@ function fetchInbox() {
     });
     const full = JSON.parse(fullRes.getContentText());
 
-    const otp = full.text.match(/\b\d{4,8}\b/);
+    const otp = extractOpenAiOtp(full.text);
     const verificationUrls = extractVerificationUrls(full.text);
     const link = verificationUrls.length > 0 ? verificationUrls[0] : "NULL";
 
@@ -159,7 +47,7 @@ function fetchInbox() {
       msg.createdAt,
       msg.from.address,
       msg.subject,
-      otp ? otp[0] : "NULL",
+      otp,
       link,
       full.text,
       msg.id
@@ -173,22 +61,4 @@ function fetchInbox() {
   } else {
     logProcess("ℹ️ No new messages to log.");
   }
-}
-
-function getLogs() {
-  const ss = ensureSpreadsheet();
-  return ss.getSheetByName(SHEET_NAME).getDataRange().getValues();
-}
-
-function getProcessLogs() {
-  const ss = ensureSpreadsheet();
-  return ss.getSheetByName(LOG_SHEET_NAME).getDataRange().getValues();
-}
-
-function getEmail() {
-  return PropertiesService.getScriptProperties().getProperty('email') || '';
-}
-
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Index');
 }
