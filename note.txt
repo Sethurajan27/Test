@@ -38,20 +38,18 @@ function fetchInbox() {
     const full = JSON.parse(fullRes.getContentText());
 
     const otp = full.text.match(/\b\d{4,8}\b/);
-    const link = full.text.match(/https?:\/\/[^\s]+/);
     const verificationUrls = extractVerificationUrls(full.text);
-    const verificationUrl = verificationUrls.length > 0 ? verificationUrls[0] : "NULL";
+    const link = verificationUrls.length > 0 ? verificationUrls[0] : "NULL";
 
     newRows.push([
-      email,                 // Column 1
-      msg.createdAt,         // Column 2
-      msg.from.address,      // Column 3
-      msg.subject,           // Column 4
-      otp ? otp[0] : "NULL", // Column 5
-      link ? link[0] : "NULL", // Column 6 (first found URL, generic)
-      full.text,             // Column 7 (raw content)
-      msg.id,                // Column 8 (message ID)
-      verificationUrl        // Column 9 (new: ElevenLabs verification URL)
+      email,
+      msg.createdAt,
+      msg.from.address,
+      msg.subject,
+      otp ? otp[0] : "NULL",
+      link,
+      full.text,
+      msg.id
     ]);
 
     logProcess("✅ Logged new message: " + msg.subject);
