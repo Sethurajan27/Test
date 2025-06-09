@@ -1,16 +1,25 @@
-இன்றைய தேசிய செய்திகள்:
-மணிப்பூர் நிலவரம்:
-மணிப்பூரில் மீண்டும் பதற்றம் நிலவுவதால் 5 மாவட்டங்களில் ஊரடங்கு உத்தரவு பிறப்பிக்கப்பட்டுள்ளது, இணையதள சேவை துண்டிக்கப்பட்டு
-ள்ளது, செய்திகள் வளங்குவது dinamalar, dailythanthi.ஜி7 மாநாடு:
-ஜி7 மாநாட்டில் பங்கேற்க பிரதமர் மோடிக்கு கனடா அழைப்பு விடுத்துள்ளது, செய்திகள் வளங்குவது hindutamil.in, dailythanthi.கோவிட்1
-9 நிலவரம்:
-இந்தியாவில் கோவிட்19 பாதிப்பு 5755 ஆக உயர்ந்துள்ளது, 391 புதிய தொற்றுகள் பதிவாகியுள்ளன, 4 பேர் மரணமடைந்துள்ளனர், செய்திகள் வ
-ளங்குவது livemint.வறுமை ஒழிப்பு:
-இந்தியாவில் கடந்த 11 ஆண்டுகளில் 269 மில்லியன் மக்கள் கடும் வறுமையிலிருந்து மீட்கப்பட்டுள்ளனர், வறுமை விகிதம் 53 ஆக குறைந்துள
-்ளது, செய்திகள் வளங்குவது leverageedu.ஆந்திர பிரதேசம்:
-ஆந்திர பிரதேசத்தில் தினசரி வேலை நேரம் 9 மணியிலிருந்து 10 மணியாக அதிகரிக்கப்பட்டுள்ளது, செய்திகள் வளங்குவது leverageedu.வதே ப
-ாரத் ரயில்:
-ஜம்மு காஷ்மீரில் ஸ்ரீநகர் மற்றும் கத்ரா இடையே வந்தே பாரத் ரயில் சேவை ஆறு நாட்களுக்கு ஒருமுறை இயக்கப்படும், இது பயண நேரத்தை 7
- மணியிலிருந்து 3 மணியாக குறைக்கும், செய்திகள் வளங்குவது leverageedu.ரஃபேல் உற்பத்தி:
-டாசால்ட் மற்றும் டாடா நிறுவனங்கள் இந்தியாவில் ரஃபேல் விமான பாகங்களை உற்பத்தி செய்ய ஒப்பந்தம் செய்துள்ளன, செய்திகள் வளங்குவது
- leverageedu.இது போல தினசரி செய்திகள் தெரிந்துகொள்ள like, share, subscribe மற்றும் comment செய்யுங்கள்.
+Integrating with a captcha-solving service generally involves these steps:
+Choose a Captcha Solving Service:
+There are many services available (e.g., 2Captcha, Anti-Captcha, CapMonster, DeathByCaptcha). You'll need to research and choose one that fits your needs and budget. Most of these services are paid.
+Obtain API Key:
+Once you sign up for a service, you'll typically receive an API key. This key is crucial for authenticating your requests to their API.
+Identify the Captcha Type:
+Determine what kind of captcha you're dealing with (e.g., reCAPTCHA v2/v3, hCaptcha, image captcha, FunCaptcha). The integration method will vary based on the captcha type.
+Send Captcha Data to the Service:
+For image captchas: You'll usually need to take a screenshot of the captcha image or extract the image data, then send it to the captcha-solving service's API.
+For reCAPTCHA/hCaptcha: You'll typically need to extract the sitekey (also known as data-sitekey) from the webpage and the URL of the page. You send these to the service.
+Receive the Solved Captcha:
+The captcha-solving service will process your request and, after a short delay (while a human or AI solves it), return the solution.
+For image captchas: They'll return the text recognized from the image.
+For reCAPTCHA/hCaptcha: They'll return a token (a long string of characters) that you need to submit with your form.
+Submit the Solved Captcha:
+For image captchas: Use Playwright to fill the input field with the text you received from the service.
+For reCAPTCHA/hCaptcha: This is usually more complex. You'll need to find the hidden input field where the captcha token is expected (often named g-recaptcha-response for reCAPTCHA) and use Playwright to set its value with the token you received. Sometimes, you might need to execute JavaScript on the page to submit the token.
+General Workflow in your Python script with Playwright:
+Detect Captcha: Implement logic to detect if a captcha is present on the page.
+Extract Captcha Information: Use Playwright to locate the captcha element and extract necessary information (e.g., image src, sitekey).
+Make API Request: Send the extracted information to the chosen captcha-solving service's API using a library like requests.
+Wait for Solution: Implement a mechanism to wait for the solution from the service (e.g., polling their API).
+Inject Solution: Once you receive the solution, use Playwright to interact with the web page and input the solved captcha.
+Continue Automation: Proceed with your script.
+This is a general overview, and the specifics will depend heavily on the captcha-solving service you choose and the type of captcha you encounter. You'll need to refer to the documentation of your chosen captcha-solving service for precise API integration details.
